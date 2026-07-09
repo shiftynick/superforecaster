@@ -1,0 +1,29 @@
+# Per-task-type model + pricing config.
+#
+# This file is the first instance of the project's "config over code" rule:
+# which model each task uses, how many tokens it may spend, and how much each
+# model costs — all live here, never as literals buried in the logic. Editing a
+# forecast to use a different model or effort level is a one-line change here.
+#
+# [tasks.<name>] — one table per task type the engine performs.
+#   model      : the model id or alias to call.
+#   max_tokens : hard cap on the response length (required by the API).
+#   effort     : OPTIONAL. Omit for the API default. If set, must be one of
+#                "low" | "medium" | "high" — passed straight through to the API
+#                to trade latency/cost for more careful reasoning.
+#   provider   : OPTIONAL. Which LLM backend runs the call. Defaults to
+#                "claude-cli" (the Claude Code CLI on the owner's subscription).
+#                More providers (Codex CLI, OpenRouter) will be added later.
+#
+# [pricing.<model>] — dollar cost per million tokens, used only to log spend.
+#   A model with no pricing table simply records cost as unknown (null).
+
+[tasks.forecast_pass]
+model = "claude-sonnet-5"
+max_tokens = 4096
+provider = "claude-cli"
+# effort omitted -> API default. Add e.g. effort = "medium" to spend more.
+
+[pricing.claude-sonnet-5]
+input_per_mtok = 3.0
+output_per_mtok = 15.0

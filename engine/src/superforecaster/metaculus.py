@@ -133,6 +133,52 @@ class MetaculusClient:
                 return
             offset += len(results)
 
+    def iter_tournament_binary_posts(
+        self, tournament: str, page_size: int = 50, max_posts: int | None = None
+    ) -> Iterator[dict[str, Any]]:
+        """Yield raw open binary posts belonging to one tournament, paging as needed.
+
+        Same list endpoint and pagination as :meth:`iter_open_binary_posts`, but
+        scoped to a tournament via the ``tournaments=<slug>`` parameter. Stops when
+        a page comes back empty, when the envelope reports no ``next`` page, or when
+        ``max_posts`` posts have been yielded. ``page_size`` is capped at the API
+        maximum of 100.
+        """
+        limit = max(1, min(page_size, 100))
+        offset = 0
+        yielded = 0
+
+        while True:
+            if max_posts is not None:
+                remaining = max_posts - yielded
+                if remaining <= 0:
+                    return
+                limit = min(limit, remaining)
+
+            params: dict[str, Any] = {
+                "tournaments": tournament,
+                "statuses": "open",
+                "forecast_type": "binary",
+                "limit": limit,
+                "offset": offset,
+                "order_by": "-published_at",
+                "with_cp": "true",
+            }
+            response = self._get("/posts/", params=params)
+            results, has_next = _unpack_list(response.json())
+            if not results:
+                return
+
+            for post in results:
+                yield post
+                yielded += 1
+                if max_posts is not None and yielded >= max_posts:
+                    return
+
+            if not has_next:
+                return
+            offset += len(results)
+
     def get_post(self, post_id: int) -> dict[str, Any]:
         """Fetch a single post by id and return its raw dict."""
         response = self._get(f"/posts/{post_id}/")

@@ -9,6 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from superforecaster import cli
+from superforecaster.llm import LlmResult
 from superforecaster.metaculus import MetaculusClient
 
 from . import fixtures
@@ -96,3 +97,85 @@ def test_build_client_returns_real_client() -> None:
     client = cli._build_client("tok")
     assert isinstance(client, MetaculusClient)
     client.close()
+
+
+_FORECAST_JSON = (
+    "Reasoning about the reference class and adjustments.\n"
+    '```json\n{"probability": 0.42, "confidence": "medium", '
+    '"rationale": "reference class then adjust", '
+    '"reference_class": "comparable questions"}\n```'
+)
+
+
+class _FakeLlm:
+    """Stands in for the LLM client; returns one fixed forecast envelope."""
+
+    def run(self, system: str, prompt: str, model: str, max_tokens: int | None = None) -> LlmResult:
+        return LlmResult(
+            text=_FORECAST_JSON,
+            input_tokens=1000,
+            output_tokens=500,
+            cost_usd=0.02,
+            stop_reason="end_turn",
+            model=model,
+        )
+
+
+def _pass_cli_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the provider CLI check succeed without a real 'claude' binary."""
+    monkeypatch.setattr("superforecaster.llm.check_claude_cli", lambda path="claude": True)
+
+
+def _seed_open_question(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Scrape one open, soon-closing question into the snapshot store."""
+    _install_fake(monkeypatch, [fixtures.open_binary_post(101, 201)])
+    runner.invoke(cli.app, ["scrape", "--data-dir", str(tmp_path)])
+
+
+def test_forecast_smoke(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    snap_dir = tmp_path / "snapshots"
+    fc_dir = tmp_path / "forecasts"
+    _seed_open_question(monkeypatch, snap_dir)
+
+    monkeypatch.setattr(cli, "_build_llm_client", lambda: _FakeLlm())
+    _pass_cli_check(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "forecast",
+            "--data-dir",
+            str(snap_dir),
+            "--forecast-dir",
+            str(fc_dir),
+            "--closing-within-days",
+            "365",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "p=0.42" in result.output
+    assert "confidence=medium" in result.output
+    assert "n=1" in result.output
+
+    from superforecaster.forecast_store import ForecastStore
+
+    stored = list(ForecastStore(fc_dir).iter_all())
+    assert len(stored) == 1
+    assert stored[0].dry_run is True
+    assert stored[0].reference_class == "comparable questions"
+
+
+def test_forecast_without_cli_exits(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("superforecaster.llm.check_claude_cli", lambda path="claude": False)
+    monkeypatch.chdir(tmp_path)  # avoid picking up a stray .env
+    result = runner.invoke(cli.app, ["forecast", "--data-dir", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "Claude Code" in result.output
+
+
+def test_forecast_no_matching_questions(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(cli, "_build_llm_client", lambda: _FakeLlm())
+    _pass_cli_check(monkeypatch)
+    result = runner.invoke(cli.app, ["forecast", "--data-dir", str(tmp_path / "empty")])
+    assert result.exit_code == 0, result.output
+    assert "no matching open questions" in result.output
