@@ -20,13 +20,26 @@ A live-scored entry in the Metaculus AI Benchmark: the simplest honest forecaste
 
 Retrieval, ensembles, market anchoring (CP is account-gated anyway), any other candidate, automation/scheduling (manual kickoff per vision).
 
-## Declared checkpoints
+## Recon findings (verified 2026-07-09)
+
+- **Season:** Summer 2026 FutureEval Bot Tournament — id `33022`, slug `summer-futureeval-2026`, $50k pool, forecasting ends 2026-09-06, ongoing now. Test sandbox: `bot-testing-area` (id `32977`, unscored).
+- **Registration:** owner creates a bot from account settings → "My Forecasting Bots" → "Create a Bot"; the bot gets its own API token (that token, not the human one, is what submits). No approval step — first API forecast *is* entry.
+- **Submission:** `POST /api/questions/forecast/` with `[{"question": <qid>, "probability_yes": p}]` (clamp 0.001–0.999); a rationale comment is **mandatory** per forecast: `POST /api/comments/create/` `{"on_post", "text", "is_private": true, "included_forecast": true}` (auto-published after close).
+- **Rule — no human in the loop:** the owner may not preview/approve/tweak the bot's forecasts on live tournament questions. Human-triggered *runs* are fine; human-filtered *forecasts* are not (prize eligibility requires passing an inspection of exactly this).
+- **Rule — one forecast per question**, no updating; scoring is spot peer score (log-based) on the last pre-close forecast.
+- **Rule — brutal timing:** questions open at random hours in batches and stay open **~1.5 hours**. The reference bot polls every 20 minutes. Manual-kickoff-only participation would miss nearly everything.
+
+## Declared checkpoints (revised per recon — the no-human-in-the-loop rule reshapes B2/B3)
 
 | # | Gate | Artifact / user action |
 |---|---|---|
-| **B1** | After recon | Registration instructions — likely requires the owner to create a dedicated Metaculus **bot account** and register it for the AIB tournament; bot token goes in `engine/.env` |
-| **B2** | Before any live submission | Dry-run forecasts on real tournament questions, with rationales, reviewed by the owner |
-| **B3** | Live | First submitted forecasts confirmed on the tournament page |
+| **B1** | After recon | Registration instructions (above) — owner creates the bot, puts its token in `engine/.env` as `METACULUS_BOT_TOKEN` |
+| **B2** | Pipeline validation | Dry-run forecasts + rationales reviewed by owner on **non-tournament questions** (our scraped store and/or the unscored `bot-testing-area`) — human review is legal there and validates prompt quality without touching live questions |
+| **B3** | Autonomy decision | Owner decides the automation question (below) and green-lights live entry; from then on the bot runs **fully autonomously** on tournament questions — no per-forecast human review, by rule |
+
+## Open decision for the owner (at B3)
+
+The 1.5-hour question windows mean real participation needs a **scheduled poller** (~every 20 min), which collides with the "manual kickoffs only" cost-control decision. Options: (a) scheduled task with hard cost caps (max forecasts/day, Sonnet-only — worst case a few dollars/day at ~5 questions/batch); (b) manual-only participation accepting we miss most questions (rung 1 becomes "infrastructure proven" rather than "meaningful score"); (c) defer live entry, validate on bot-testing-area only. Recommendation: (a) with caps.
 
 ## New external dependency
 
