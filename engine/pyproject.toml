@@ -4,6 +4,7 @@ version = "0.0.1"
 description = "Forecasting engine: research, ensemble forecasting, aggregation, evaluation harness"
 requires-python = ">=3.11"
 dependencies = [
+    "anthropic>=0.116.0",
     "httpx>=0.28.1",
     "pydantic>=2.13.4",
     "typer>=0.26.8",
