@@ -221,6 +221,8 @@ class ClaudeCliClient:
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=self._timeout_s,
                 env=env,
             )
@@ -416,6 +418,8 @@ class CodexCliClient:
                     stdin=subprocess.DEVNULL,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=self._timeout_s,
                     cwd=workdir,
                 )
