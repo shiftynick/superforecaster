@@ -202,11 +202,13 @@ class ClaudeCliClient:
             prompt,
             "--system-prompt",
             system,
-            "--model",
-            model,
             "--output-format",
             "json",
         ]
+        # Empty model means "use the CLI's own default model" — same convention
+        # as the Codex client, so config treats "" uniformly across providers.
+        if model:
+            argv += ["--model", model]
         if effort:
             argv += ["--effort", effort]
         # Copy the environment minus the API key so billing stays on the
@@ -402,6 +404,7 @@ class CodexCliClient:
         schema_file: str | None = None
         try:
             if json_schema is not None:
+                json_schema = _strictify_schema(json_schema)
                 fd, schema_file = tempfile.mkstemp(prefix="sf-codex-schema-", suffix=".json")
                 with os.fdopen(fd, "w", encoding="utf-8") as fh:
                     json.dump(json_schema, fh)
@@ -487,6 +490,30 @@ def _result_from_jsonl(stdout: str, model: str, stderr: str) -> LlmResult:
         stop_reason=None,
         model=model,
     )
+
+
+def _strictify_schema(schema: dict[str, object]) -> dict[str, object]:
+    """Return a copy of a JSON Schema adjusted for OpenAI strict mode.
+
+    Codex validates ``--output-schema`` against OpenAI's strict rules, which
+    require every ``object`` node to carry ``"additionalProperties": false``.
+    Pydantic's ``model_json_schema()`` omits that, so we add it recursively.
+    The input is not mutated.
+    """
+
+    def walk(node: object) -> object:
+        if isinstance(node, dict):
+            out = {key: walk(value) for key, value in node.items()}
+            if out.get("type") == "object":
+                out.setdefault("additionalProperties", False)
+            return out
+        if isinstance(node, list):
+            return [walk(item) for item in node]
+        return node
+
+    result = walk(schema)
+    assert isinstance(result, dict)  # a dict in is a dict out; narrows for mypy
+    return result
 
 
 def build_llm_client(config: TaskModelConfig) -> LlmClient:

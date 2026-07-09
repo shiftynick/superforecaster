@@ -392,7 +392,9 @@ def test_codex_argv_and_schema_file() -> None:
     assert "--output-schema" in argv
     written = runner.schema_file_contents[0]
     assert written is not None
-    assert json.loads(written) == schema
+    # The written schema is the input plus OpenAI-strict normalization: every
+    # object node gains "additionalProperties": false (see _strictify_schema).
+    assert json.loads(written) == {**schema, "additionalProperties": False}
 
 
 def test_codex_effort_override_present_when_set() -> None:

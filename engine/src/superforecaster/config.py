@@ -143,7 +143,8 @@ def load_task_config(task: str, path: Path | None = None) -> TaskModelConfig:
 
     model = table.get("model")
     max_tokens = table.get("max_tokens")
-    if not isinstance(model, str) or not model:
+    # Empty string is allowed: it means "use the provider CLI's own default model".
+    if not isinstance(model, str):
         raise ValueError(f"[tasks.{task}] is missing a 'model' string")
     if not isinstance(max_tokens, int) or isinstance(max_tokens, bool):
         raise ValueError(f"[tasks.{task}] is missing an integer 'max_tokens'")
