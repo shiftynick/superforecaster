@@ -41,9 +41,11 @@ Retrieval, ensembles, market anchoring (CP is account-gated anyway), any other c
 
 The 1.5-hour question windows mean real participation needs a **scheduled poller** (~every 20 min), which collides with the "manual kickoffs only" cost-control decision. Options: (a) scheduled task with hard cost caps (max forecasts/day, Sonnet-only — worst case a few dollars/day at ~5 questions/batch); (b) manual-only participation accepting we miss most questions (rung 1 becomes "infrastructure proven" rather than "meaningful score"); (c) defer live entry, validate on bot-testing-area only. Recommendation: (a) with caps.
 
-## New external dependency
+## New external dependency (revised 2026-07-09, ADR-0002)
 
-Forecasting passes call the Anthropic API — needs `ANTHROPIC_API_KEY` in `engine/.env` and incurs per-call cost (~$0.17/question at Sonnet, logged per the cost-visibility requirement).
+Forecasting passes call Claude through a **Claude Code CLI wrapper** using the owner's subscription — no `ANTHROPIC_API_KEY` needed. Requires the `claude` CLI installed and logged in. Token usage still logged per call (cost is notional quota draw, not billed dollars).
+
+**Token note (owner, 2026-07-09):** the `METACULUS_TOKEN` already in `engine/.env` is the **bot account's** token (Metaculus exposes no separate human token). It serves both reading and submitting; `METACULUS_BOT_TOKEN` remains an optional override. This also explains the CP gating — bot accounts are walled off from community predictions.
 
 ## Agent execution plan
 
