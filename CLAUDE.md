@@ -13,6 +13,7 @@ Personal forecasting system: give it a resolvable question, it researches and re
 | `engine/` | Python forecasting engine (uv project) |
 | `web/` | TypeScript web app (does not exist yet — see ADR-0001) |
 | `.claude/skills/` | Project skills — versioned process; prefer invoking/extending a skill over ad-hoc process |
+| `.agents/skills/` | **Byte-identical mirror of `.claude/skills/`** — Codex agents read this one. Any skill create/edit/delete MUST be applied to both directories in the same change; verify with a recursive hash compare before committing |
 
 ## Commands (run from `engine/`)
 
