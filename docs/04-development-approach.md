@@ -67,8 +67,11 @@ The skill list itself is living — building skills for the project's own develo
 
 Git from day zero — including the docs, so vision decisions get history too. Feature branches; `main` stays green; small reviewable diffs over big drops. (The project folder is not yet a git repo — `git init` + an initial commit of the existing docs is step zero, ready to run on your word.)
 
+## Decided
+
+- **Human gate (2026-07-09):** the user does **not** approve every merge. Routine, in-plan merges are gated by agent review (`/code-review`) + green verification; human verification happens at the pre-declared checkpoints and for decision-weight items per § Human checkpoints.
+
 ## Open questions (your call)
 
 1. **Stack**: Python engine (dominant ecosystem for the forecasting/stats libraries and the metac-bot template) + TypeScript web app is the conventional split; a single TypeScript codebase is the alternative. Preference?
-2. **Human gate**: do you want to approve every merge, or only milestone/decision-heavy reviews (with `/code-review` gating the rest)?
-3. **ADR granularity**: every notable choice, or only choices that would surprise a future reader?
+2. **ADR granularity**: every notable choice, or only choices that would surprise a future reader?
