@@ -1,0 +1,650 @@
+<!doctype html>
+<!--
+  Pattern library for annotated-review-html.
+  Do not fill this mechanically from markdown headings. Read the source material,
+  synthesize review units, then copy/adapt the layout, annotation controls, and
+  export script into a bespoke HTML walkthrough.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{TITLE}}</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --panel-2: #f0f4f7;
+      --ink: #1d2730;
+      --muted: #63717d;
+      --line: #cfd8df;
+      --line-strong: #9fb0bd;
+      --blue: #1e6b96;
+      --green: #35754b;
+      --gold: #8a651d;
+      --red: #a13f3f;
+      --shadow: 0 8px 22px rgba(28, 38, 46, 0.08);
+      --radius: 8px;
+      font-family: "Segoe UI", Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.45;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      background: #e8eef2;
+      border: 1px solid #d5e0e7;
+      border-radius: 4px;
+      padding: 0.05rem 0.25rem;
+      font-size: 0.93em;
+    }
+    pre {
+      background: #101820;
+      border-radius: 6px;
+      color: #edf6f8;
+      overflow-x: auto;
+      padding: 12px;
+    }
+    pre code {
+      background: transparent;
+      border: 0;
+      color: inherit;
+      padding: 0;
+    }
+    table {
+      border-collapse: collapse;
+      display: block;
+      margin: 10px 0;
+      overflow-x: auto;
+      width: 100%;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 7px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #edf3f6; }
+    .layout {
+      display: grid;
+      grid-template-columns: 296px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+    .sidebar {
+      background: #18232b;
+      color: #eef4f7;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 18px;
+      position: sticky;
+      top: 0;
+    }
+    .sidebar h1 {
+      font-size: 1.05rem;
+      line-height: 1.2;
+      margin: 0 0 6px;
+    }
+    .subtitle {
+      color: #adbdc7;
+      font-size: 0.82rem;
+      margin-bottom: 18px;
+    }
+    .nav {
+      display: grid;
+      gap: 4px;
+      margin: 0 0 20px;
+    }
+    .nav a {
+      border-radius: 6px;
+      color: #dce7ed;
+      display: block;
+      font-size: 0.88rem;
+      padding: 8px 9px;
+    }
+    .nav a:hover {
+      background: rgba(255, 255, 255, 0.08);
+      text-decoration: none;
+    }
+    .sidebar-actions {
+      border-top: 1px solid rgba(255, 255, 255, 0.13);
+      padding-top: 14px;
+    }
+    .sidebar-actions button,
+    .sidebar-actions a.button-link {
+      margin-bottom: 8px;
+      width: 100%;
+    }
+    .main { padding: 28px 30px 56px; }
+    .hero,
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .hero {
+      margin-bottom: 18px;
+      padding: 24px;
+    }
+    .eyebrow {
+      color: var(--blue);
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+    .hero h2 {
+      font-size: 2rem;
+      line-height: 1.1;
+      margin: 0 0 10px;
+    }
+    .hero p {
+      color: var(--muted);
+      font-size: 1rem;
+      margin: 0;
+      max-width: 920px;
+    }
+    .quick-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-top: 18px;
+    }
+    .metric {
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      min-height: 88px;
+      padding: 12px;
+    }
+    .metric .label {
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+    .metric .value {
+      font-size: 1.2rem;
+      font-weight: 700;
+    }
+    .metric .detail {
+      color: var(--muted);
+      font-size: 0.82rem;
+      margin-top: 4px;
+    }
+    .section {
+      margin: 16px 0;
+      overflow: hidden;
+    }
+    .section-header {
+      border-bottom: 1px solid var(--line);
+      display: grid;
+      gap: 16px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      padding: 18px 20px;
+    }
+    .section-header h3 {
+      font-size: 1.25rem;
+      margin: 0 0 4px;
+    }
+    .section-header p {
+      color: var(--muted);
+      margin: 0;
+    }
+    .section-body {
+      display: grid;
+      gap: 18px;
+      grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+      padding: 18px 20px 20px;
+    }
+    .source-content h4 {
+      font-size: 1rem;
+      margin: 16px 0 8px;
+    }
+    .source-content p,
+    .source-content li {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+    .callout {
+      background: #eef6fa;
+      border-left: 4px solid var(--blue);
+      border-radius: 6px;
+      margin: 12px 0;
+      padding: 12px 14px;
+    }
+    .callout strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+    .prompt-list {
+      display: grid;
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .prompt {
+      background: #fbfcfd;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--muted);
+      padding: 9px 10px;
+    }
+    .annotation {
+      background: #f7fafb;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 12px;
+    }
+    .annotation h4 {
+      font-size: 0.95rem;
+      margin: 0 0 8px;
+    }
+    .annotation label {
+      color: var(--muted);
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 700;
+      margin: 8px 0 4px;
+      text-transform: uppercase;
+    }
+    .annotation select,
+    .annotation textarea,
+    #compiledMarkdown {
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      color: var(--ink);
+      font: inherit;
+      width: 100%;
+    }
+    .annotation select {
+      background: #ffffff;
+      padding: 7px 8px;
+    }
+    .annotation textarea {
+      min-height: 132px;
+      padding: 9px;
+      resize: vertical;
+    }
+    .note-meta {
+      color: var(--muted);
+      font-size: 0.75rem;
+      margin-top: 7px;
+    }
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    button,
+    .button-link {
+      align-items: center;
+      background: var(--blue);
+      border: 1px solid var(--blue);
+      border-radius: 6px;
+      color: #ffffff;
+      cursor: pointer;
+      display: inline-flex;
+      font: inherit;
+      font-weight: 700;
+      justify-content: center;
+      min-height: 36px;
+      padding: 8px 11px;
+      text-align: center;
+    }
+    button.secondary,
+    .button-link.secondary {
+      background: #ffffff;
+      border-color: var(--line-strong);
+      color: var(--ink);
+    }
+    button.danger {
+      background: #ffffff;
+      border-color: #d9a7a7;
+      color: var(--red);
+    }
+    .export-panel {
+      background: #111b22;
+      border-radius: var(--radius);
+      color: #e8f0f3;
+      margin: 18px 0 0;
+      padding: 18px;
+    }
+    .export-panel h3 { margin: 0 0 7px; }
+    .export-panel p {
+      color: #b9c7ce;
+      margin: 0 0 12px;
+    }
+    #compiledMarkdown {
+      background: #071016;
+      border-color: #31434d;
+      color: #edf6f8;
+      display: none;
+      min-height: 240px;
+      padding: 12px;
+      resize: vertical;
+    }
+    .status-line {
+      color: #b9c7ce;
+      font-size: 0.85rem;
+      min-height: 1.4em;
+      margin-top: 8px;
+    }
+    .source-link {
+      font-size: 0.88rem;
+      margin-top: 10px;
+    }
+    @media (max-width: 1100px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar {
+        height: auto;
+        position: relative;
+      }
+      .nav,
+      .quick-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    @media (max-width: 760px) {
+      .main { padding: 18px 12px 38px; }
+      .section-body,
+      .section-header,
+      .quick-grid,
+      .nav {
+        grid-template-columns: 1fr;
+      }
+      .hero h2 { font-size: 1.55rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h1>{{SHORT_TITLE}}</h1>
+      <div class="subtitle">{{MODE_LABEL}} review companion</div>
+      <nav class="nav" aria-label="Walkthrough sections">
+{{NAV_ITEMS}}
+        <a href="#export">Export Feedback</a>
+      </nav>
+      <div class="sidebar-actions">
+        <button type="button" id="copyFeedbackTop">Copy feedback markdown</button>
+        <button type="button" class="secondary" id="showCompiledTop">Preview markdown</button>
+        <a class="button-link secondary" href="{{SOURCE_HREF}}">Open source markdown</a>
+        <button type="button" class="danger" id="clearAllTop">Clear all notes</button>
+      </div>
+    </aside>
+    <main class="main">
+      <section class="hero" id="start">
+        <div class="eyebrow">{{MODE_LABEL}} companion</div>
+        <h2>{{TITLE}}</h2>
+        <p>{{INTRO}}</p>
+        <div class="quick-grid">
+          <div class="metric">
+            <div class="label">Source</div>
+            <div class="value">Markdown</div>
+            <div class="detail">{{SOURCE_PATH}}</div>
+          </div>
+          <div class="metric">
+            <div class="label">Sections</div>
+            <div class="value">{{SECTION_COUNT}}</div>
+            <div class="detail">Each section has status and notes.</div>
+          </div>
+          <div class="metric">
+            <div class="label">Feedback</div>
+            <div class="value">Markdown</div>
+            <div class="detail">Copy, preview, or download review notes.</div>
+          </div>
+          <div class="metric">
+            <div class="label">Saved</div>
+            <div class="value">Local</div>
+            <div class="detail">Notes persist in this browser only.</div>
+          </div>
+        </div>
+      </section>
+{{SECTIONS}}
+      <section class="export-panel" id="export">
+        <h3>Export Feedback</h3>
+        <p>Compiles section status and notes into markdown that can be pasted back into chat.</p>
+        <div class="button-row">
+          <button type="button" id="copyFeedback">Copy feedback markdown</button>
+          <button type="button" class="secondary" id="showCompiled">Preview markdown</button>
+          <button type="button" class="secondary" id="downloadMarkdown">Download markdown</button>
+          <button type="button" class="danger" id="clearAll">Clear all notes</button>
+        </div>
+        <div class="status-line" id="exportStatus" aria-live="polite"></div>
+        <textarea id="compiledMarkdown" readonly></textarea>
+      </section>
+      <div class="source-link">Source: <a href="{{SOURCE_HREF}}">{{SOURCE_PATH}}</a></div>
+    </main>
+  </div>
+  <script>
+    (function () {
+      const storageKey = "{{STORAGE_KEY}}";
+      const sourcePath = "{{SOURCE_PATH_JS}}";
+      const htmlPath = "{{HTML_PATH_JS}}";
+      const documentTitle = "{{TITLE_JS}}";
+      const modeLabel = "{{MODE_LABEL_JS}}";
+      const sectionEls = Array.from(document.querySelectorAll(".note-section"));
+      const statusOptions = [
+        ["", "No status"],
+        ["agree", "Agree"],
+        ["question", "Question"],
+        ["change", "Needs change"],
+        ["blocker", "Blocker"],
+        ["follow-up", "Follow-up"]
+      ];
+
+      function loadState() {
+        try { return JSON.parse(localStorage.getItem(storageKey) || "{}"); }
+        catch (error) { return {}; }
+      }
+
+      function saveState(state) {
+        localStorage.setItem(storageKey, JSON.stringify(state));
+      }
+
+      let state = loadState();
+
+      function escapeHtml(value) {
+        return String(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function buildAnnotations() {
+        sectionEls.forEach((section) => {
+          const sectionId = section.dataset.sectionId;
+          const sectionTitle = section.dataset.sectionTitle;
+          const target = section.querySelector(".annotation");
+          if (!target) return;
+          target.innerHTML = [
+            "<h4>Your notes</h4>",
+            "<label for=\"status-" + sectionId + "\">Status</label>",
+            "<select id=\"status-" + sectionId + "\" data-note-status=\"" + sectionId + "\"></select>",
+            "<label for=\"note-" + sectionId + "\">Feedback</label>",
+            "<textarea id=\"note-" + sectionId + "\" data-note-text=\"" + sectionId + "\" placeholder=\"Add feedback on " + escapeHtml(sectionTitle) + "...\"></textarea>",
+            "<div class=\"button-row\"><button type=\"button\" class=\"secondary\" data-clear-note=\"" + sectionId + "\">Clear this note</button></div>",
+            "<div class=\"note-meta\" id=\"meta-" + sectionId + "\">No local note saved.</div>"
+          ].join("");
+          const select = target.querySelector("[data-note-status]");
+          statusOptions.forEach(([value, label]) => {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = label;
+            select.appendChild(option);
+          });
+          const textarea = target.querySelector("[data-note-text]");
+          const saved = state[sectionId] || {};
+          select.value = saved.status || "";
+          textarea.value = saved.text || "";
+          updateMeta(sectionId);
+          select.addEventListener("change", () => updateNote(sectionId, { status: select.value }));
+          textarea.addEventListener("input", () => updateNote(sectionId, { text: textarea.value }));
+        });
+        document.querySelectorAll("[data-clear-note]").forEach((button) => {
+          button.addEventListener("click", () => clearNote(button.dataset.clearNote));
+        });
+      }
+
+      function updateNote(sectionId, patch) {
+        const current = state[sectionId] || {};
+        state[sectionId] = Object.assign({}, current, patch, { updatedAt: new Date().toISOString() });
+        if (!state[sectionId].status && !state[sectionId].text) delete state[sectionId];
+        saveState(state);
+        updateMeta(sectionId);
+      }
+
+      function clearNote(sectionId) {
+        const section = document.querySelector("[data-section-id=\"" + sectionId + "\"]");
+        if (!section) return;
+        const select = section.querySelector("[data-note-status]");
+        const textarea = section.querySelector("[data-note-text]");
+        if (select) select.value = "";
+        if (textarea) textarea.value = "";
+        delete state[sectionId];
+        saveState(state);
+        updateMeta(sectionId);
+      }
+
+      function updateMeta(sectionId) {
+        const meta = document.getElementById("meta-" + sectionId);
+        if (!meta) return;
+        const item = state[sectionId];
+        if (!item || !item.updatedAt) {
+          meta.textContent = "No local note saved.";
+          return;
+        }
+        meta.textContent = "Saved " + new Date(item.updatedAt).toLocaleString();
+      }
+
+      function statusLabel(value) {
+        const option = statusOptions.find(([key]) => key === value);
+        return option ? option[1] : value;
+      }
+
+      function compileMarkdown() {
+        const lines = [];
+        lines.push("# Feedback on " + documentTitle);
+        lines.push("");
+        lines.push("- Source: `" + sourcePath + "`");
+        lines.push("- Walkthrough: `" + htmlPath + "`");
+        lines.push("- Mode: `" + modeLabel + "`");
+        lines.push("- Generated: " + new Date().toLocaleString());
+        lines.push("");
+        const annotated = sectionEls.map((section) => {
+          const id = section.dataset.sectionId;
+          const item = state[id] || {};
+          return {
+            title: section.dataset.sectionTitle,
+            status: item.status || "",
+            text: (item.text || "").trim()
+          };
+        }).filter((item) => item.status || item.text);
+        if (!annotated.length) {
+          lines.push("_No section feedback entered yet._");
+          return lines.join("\n");
+        }
+        lines.push("## Section Feedback");
+        lines.push("");
+        annotated.forEach((item) => {
+          lines.push("### " + item.title);
+          if (item.status) {
+            lines.push("");
+            lines.push("- Status: " + statusLabel(item.status));
+          }
+          if (item.text) {
+            lines.push("");
+            lines.push(item.text);
+          }
+          lines.push("");
+        });
+        return lines.join("\n").trim() + "\n";
+      }
+
+      async function copyFeedback() {
+        const markdown = compileMarkdown();
+        const textarea = document.getElementById("compiledMarkdown");
+        textarea.value = markdown;
+        textarea.style.display = "block";
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(markdown);
+          } else {
+            textarea.focus();
+            textarea.select();
+            document.execCommand("copy");
+          }
+          setStatus("Feedback markdown copied to clipboard.");
+        } catch (error) {
+          textarea.focus();
+          textarea.select();
+          setStatus("Clipboard copy was blocked. The markdown is selected below.");
+        }
+      }
+
+      function showCompiled() {
+        const textarea = document.getElementById("compiledMarkdown");
+        textarea.value = compileMarkdown();
+        textarea.style.display = "block";
+        textarea.focus();
+        setStatus("Compiled markdown preview updated.");
+      }
+
+      function downloadMarkdown() {
+        const markdown = compileMarkdown();
+        const blob = new Blob([markdown], { type: "text/markdown" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "{{DOWNLOAD_NAME}}";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        setStatus("Markdown download started.");
+      }
+
+      function clearAllNotes() {
+        const ok = confirm("Clear all notes saved for this walkthrough in this browser?");
+        if (!ok) return;
+        state = {};
+        saveState(state);
+        document.querySelectorAll("[data-note-status]").forEach((select) => { select.value = ""; });
+        document.querySelectorAll("[data-note-text]").forEach((textarea) => { textarea.value = ""; });
+        sectionEls.forEach((section) => updateMeta(section.dataset.sectionId));
+        setStatus("All local notes cleared.");
+      }
+
+      function setStatus(message) {
+        const status = document.getElementById("exportStatus");
+        if (status) status.textContent = message;
+      }
+
+      buildAnnotations();
+      [
+        ["copyFeedback", copyFeedback],
+        ["copyFeedbackTop", copyFeedback],
+        ["showCompiled", showCompiled],
+        ["showCompiledTop", showCompiled],
+        ["downloadMarkdown", downloadMarkdown],
+        ["clearAll", clearAllNotes],
+        ["clearAllTop", clearAllNotes]
+      ].forEach(([id, handler]) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener("click", handler);
+      });
+    })();
+  </script>
+</body>
+</html>

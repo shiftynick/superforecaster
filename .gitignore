@@ -1,0 +1,19 @@
+# local agent settings (machine-specific permissions)
+.claude/settings.local.json
+
+# future code artifacts
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+
+# secrets & local env
+.env
+.env.*
+*.local
+
+# OS noise
+Thumbs.db
+.DS_Store

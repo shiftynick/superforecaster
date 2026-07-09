@@ -1,0 +1,578 @@
+<title>Superforecaster Vision — Decision Review</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --sidebar: #18232b; --text: #1d2730;
+    --muted: #63717d; --line: #cfd8df; --blue: #1e6b96; --green: #35754b;
+    --gold: #8a651d; --red: #a13f3f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 "Segoe UI", system-ui, sans-serif; }
+  a { color: var(--blue); }
+  .wrap { display: flex; min-height: 100vh; }
+  nav.side { position: sticky; top: 0; align-self: flex-start; height: 100vh;
+    overflow-y: auto; width: 270px; flex: 0 0 270px; background: var(--sidebar);
+    color: #d7e0e6; padding: 22px 18px; }
+  nav.side h1 { font-size: 17px; margin: 0 0 4px; color: #fff; line-height: 1.3; }
+  nav.side .sub { font-size: 12px; color: #8fa3af; margin-bottom: 18px; }
+  nav.side .grp { font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    color: #7d919d; margin: 16px 0 6px; }
+  nav.side a.nl { display: flex; justify-content: space-between; gap: 8px;
+    color: #d7e0e6; text-decoration: none; font-size: 13px; padding: 4px 6px;
+    border-radius: 5px; }
+  nav.side a.nl:hover { background: #24323c; }
+  nav.side a.nl .dot { flex: 0 0 auto; font-size: 11px; color: #7d919d; }
+  .acts { margin-top: 20px; border-top: 1px solid #2b3a45; padding-top: 14px;
+    display: flex; flex-direction: column; gap: 8px; }
+  .acts button { background: #24323c; color: #e6edf1; border: 1px solid #35464f;
+    border-radius: 6px; padding: 7px 10px; font-size: 13px; cursor: pointer;
+    text-align: left; }
+  .acts button:hover { background: #2c3d48; }
+  .acts button.primary { background: var(--blue); border-color: var(--blue); }
+  .acts button:focus-visible, .ann button:focus-visible, select:focus-visible,
+  textarea:focus-visible { outline: 2px solid #7db8d8; outline-offset: 1px; }
+  #exportStatus { font-size: 12px; color: #9fc9e2; min-height: 16px; }
+  main { flex: 1; padding: 28px 34px 80px; max-width: 940px; }
+  .intro { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 18px 22px; margin-bottom: 22px; }
+  .intro h2 { margin: 0 0 8px; font-size: 20px; }
+  .intro p { margin: 6px 0; }
+  .intro .meta { font-size: 12.5px; color: var(--muted); }
+  section.unit { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 18px 22px; margin-bottom: 18px;
+    scroll-margin-top: 12px; }
+  section.unit h3 { margin: 0; font-size: 17px; }
+  .purpose { color: var(--muted); font-size: 13.5px; margin: 3px 0 12px; }
+  .tag { display: inline-block; font-size: 11px; letter-spacing: .05em;
+    text-transform: uppercase; border-radius: 4px; padding: 2px 7px;
+    margin-left: 8px; vertical-align: 2px; }
+  .tag.settled { background: #e2efe7; color: var(--green); }
+  .tag.default { background: #e3edf4; color: var(--blue); }
+  .tag.open { background: #f4ecda; color: var(--gold); }
+  .unit p, .unit li { font-size: 14.5px; }
+  .unit ul { padding-left: 20px; margin: 8px 0; }
+  .evi { font-size: 13px; color: var(--muted); border-left: 3px solid var(--line);
+    padding: 2px 0 2px 10px; margin: 10px 0; }
+  .prompts { background: #f2f6f9; border: 1px solid #dbe6ed; border-radius: 6px;
+    padding: 10px 14px; margin: 12px 0 0; }
+  .prompts .pt { font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--blue); margin-bottom: 4px; }
+  .prompts ul { margin: 0; padding-left: 18px; }
+  .prompts li { font-size: 13.5px; margin: 3px 0; }
+  .tbl { overflow-x: auto; margin: 10px 0; }
+  table { border-collapse: collapse; font-size: 13.5px; min-width: 560px; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left;
+    vertical-align: top; }
+  th { background: #eef2f5; font-weight: 600; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .ann { border-top: 1px dashed var(--line); margin-top: 14px; padding-top: 12px;
+    display: grid; grid-template-columns: 190px 1fr; gap: 10px 14px;
+    align-items: start; }
+  .ann label { font-size: 12px; color: var(--muted); display: block;
+    margin-bottom: 3px; }
+  .ann select { width: 100%; padding: 6px 8px; border: 1px solid var(--line);
+    border-radius: 6px; background: #fff; font-size: 13.5px; color: var(--text); }
+  .ann textarea { width: 100%; min-height: 64px; resize: vertical;
+    border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px;
+    font: 13.5px/1.5 "Segoe UI", system-ui, sans-serif; color: var(--text); }
+  .ann .foot { grid-column: 1 / -1; display: flex; justify-content: space-between;
+    align-items: center; gap: 10px; }
+  .ann .stamp { font-size: 11.5px; color: var(--muted); }
+  .ann button.clear1 { background: #fff; color: var(--red);
+    border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px;
+    font-size: 12.5px; cursor: pointer; }
+  .ann button.clear1:hover { border-color: var(--red); }
+  .s-agree { border-left: 4px solid var(--green); }
+  .s-agree_notes { border-left: 4px solid #5b8f6f; }
+  .s-revise { border-left: 4px solid var(--gold); }
+  .s-reject { border-left: 4px solid var(--red); }
+  .s-discuss { border-left: 4px solid var(--blue); }
+  #previewBox { display: none; margin: 0 0 20px; }
+  #previewBox textarea { width: 100%; min-height: 260px; font: 12.5px/1.5 Consolas,
+    monospace; border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  @media (max-width: 860px) {
+    .wrap { flex-direction: column; }
+    nav.side { position: static; width: auto; height: auto; flex: initial; }
+    main { padding: 18px 14px 60px; }
+    .ann { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="wrap">
+<nav class="side" aria-label="Review navigation">
+  <h1>Superforecaster Vision</h1>
+  <div class="sub">Decision review &middot; signoff mode &middot; 2026-07-09</div>
+
+  <div class="grp">Foundations</div>
+  <a class="nl" href="#core-bet">Scaffold, not model <span class="dot" data-dot="core-bet"></span></a>
+  <a class="nl" href="#method">Evaluation-first method <span class="dot" data-dot="method"></span></a>
+  <a class="nl" href="#goals">Mission &amp; success ladder <span class="dot" data-dot="goals"></span></a>
+
+  <div class="grp">Forecasting pipeline</div>
+  <a class="nl" href="#research">Research &amp; retrieval <span class="dot" data-dot="research"></span></a>
+  <a class="nl" href="#aggregation">Ensemble math <span class="dot" data-dot="aggregation"></span></a>
+  <a class="nl" href="#market">Market anchoring <span class="dot" data-dot="market"></span></a>
+  <a class="nl" href="#abstention">Selective abstention <span class="dot" data-dot="abstention"></span></a>
+  <a class="nl" href="#updating">Continuous re-forecasting <span class="dot" data-dot="updating"></span></a>
+  <a class="nl" href="#explain">Legible explanation <span class="dot" data-dot="explain"></span></a>
+
+  <div class="grp">Architecture</div>
+  <a class="nl" href="#race">The A–E race <span class="dot" data-dot="race"></span></a>
+  <a class="nl" href="#hypothesis-c">Hypothesis C: your graph <span class="dot" data-dot="hypothesis-c"></span></a>
+
+  <div class="grp">Scope</div>
+  <a class="nl" href="#scope">Non-goals &amp; domain <span class="dot" data-dot="scope"></span></a>
+  <a class="nl" href="#next">Open items &amp; next move <span class="dot" data-dot="next"></span></a>
+
+  <div class="acts">
+    <button class="primary" id="btnCopy" type="button">Copy feedback markdown</button>
+    <button id="btnPreview" type="button">Preview markdown</button>
+    <button id="btnDownload" type="button">Download markdown</button>
+    <button id="btnClearAll" type="button">Clear all notes</button>
+    <div id="exportStatus" aria-live="polite"></div>
+  </div>
+</nav>
+
+<main>
+  <div class="intro">
+    <h2>What you're reviewing</h2>
+    <p>Every design decision currently baked into the superforecaster agent's
+    vision, distilled from <code>docs/VISION.md</code> and its supporting docs
+    (00&ndash;03). Each unit states the decision, why the evidence points there, and
+    what your feedback would change. Set a status (<b>Agree / Revise / Reject /
+    Discuss</b>), add notes, then use <b>Copy feedback markdown</b> and paste the
+    result back into chat &mdash; only sections you touched are exported.</p>
+    <p class="meta">Tags: <span class="tag settled">evidence-settled</span> backed by
+    verified findings &middot; <span class="tag default">default</span> our judgment call,
+    cheap to change &middot; <span class="tag open">open</span> explicitly undecided,
+    your input steers it. Notes save automatically in this browser.</p>
+    <p class="meta">Sources: <code>N:\superforecaster\docs\VISION.md</code>,
+    <code>00-discovery-plan.md</code>, <code>01-prior-art.md</code>,
+    <code>02-evaluation-harness.md</code>, <code>03-architecture-candidates.md</code></p>
+  </div>
+
+  <div id="previewBox">
+    <textarea id="previewArea" readonly aria-label="Feedback markdown preview"></textarea>
+  </div>
+
+  <section class="unit" id="core-bet" data-unit="Scaffold, not model">
+    <h3>The core bet: scaffold, not model<span class="tag settled">evidence-settled</span></h3>
+    <div class="purpose">We build an orchestration layer around rented frontier models. No training, no fine-tuning.</div>
+    <p>Every competitive system found in the research &mdash; Halawi's pipeline,
+    FutureSearch, Preseen, Bridgewater's AIA Forecaster &mdash; is a scaffold around
+    frontier models: retrieval, prompting, aggregation, calibration. None trains its own
+    model. This keeps the project solo-buildable and means each frontier model release
+    upgrades us for free.</p>
+    <div class="evi">Trade-off accepted: our ceiling rides on vendor models and their
+    pricing; we own the orchestration IP, not the intelligence.</div>
+    <div class="prompts"><div class="pt">Review prompts</div><ul>
+      <li>Comfortable with full dependency on vendor models (cost, ToS, deprecation)?</li>
+      <li>Should cheap open-weight fine-tuning ever trigger revisiting this?</li>
+    </ul></div>
+    <div class="ann" data-ann="core-bet"></div>
+  </section>
+
+  <section class="unit" id="method" data-unit="Evaluation-first method">
+    <h3>Evaluation-first method<span class="tag default">default</span></h3>
+    <div class="purpose">The measurement harness ships before any architecture; no design is adopted without beating baseline on a leakage-hardened backtest.</div>
+    <p>Forecast feedback is brutally slow (months per resolution) and score gaps between
+    designs are small (~0.01&ndash;0.03 Brier), so intuition can't adjudicate designs.
+    The method: pre-registered experiments, paired Brier tests on frozen question sets,
+    hundreds of questions per comparison, and a live tournament entry whose divergence
+    from backtests flags a broken backtest.</p>
+    <div class="evi">Cost: slower first "real" agent. The discipline is the point, but it
+    is a pace choice you should explicitly endorse.</div>
+    <div class="prompts"><div class="pt">Review prompts</div><ul>
+      <li>Is the measured pace acceptable, or do you want a scrappier build-first loop?</li>
+      <li>Is "beats baseline with statistical significance" the right adoption bar?</li>
+    </ul></div>
+    <div class="ann" data-ann="method"></div>
+  </section>
+
+  <section class="unit" id="goals" data-unit="Mission &amp; success ladder">
+    <h3>Mission &amp; success ladder<span class="tag open">open — steer this</span></h3>
+    <div class="purpose">What "done" means. This is the unit where your feedback matters most.</div>
+    <p>Current mission: <i>calibrated probability + legible argument</i> for
+    Metaculus/Kalshi-style resolvable questions, scored publicly. The ladder:</p>
+    <div class="tbl"><table>
+      <tr><th>Rung</th><th>Milestone</th><th>Proves</th></tr>
+      <tr><td class="num">1</td><td>Baseline bot live &amp; scored on Metaculus AIB</td><td>Infrastructure works</td></tr>
+      <tr><td class="num">2</td><td>Ensemble beats baseline (significant, backtest)</td><td>Harness can adjudicate designs</td></tr>
+      <tr><td class="num">3</td><td>Beat the median AIB bot live</td><td>Competitive scaffold</td></tr>
+      <tr><td class="num">4</td><td>Beat community prediction on selected questions</td><td>Genuine edge exists</td></tr>
+      <tr><td class="num">5</td><td>Approach Metaculus Pro parity</td><td>The frontier (Pros beat all bots, &minus;20 head-to-head, Q2 2025)</td></tr>
+    </table></div>
+    <p>Implicit choice: success = <b>tournament Brier score</b>. Plausible alternative
+    missions we did <i>not</i> choose: a personal decision-support tool for questions
+    <i>you</i> care about, a research assistant that produces forecast reports, or a
+    product for others.</p>
+    <div class="prompts"><div class="pt">Review prompts</div><ul>
+      <li>Is public tournament standing the goal, or a private decision tool that tournaments merely validate?</li>
+      <li>Is the legible argument co-equal with the number, or secondary?</li>
+      <li>Any rung you'd add, drop, or reorder?</li>
+    </ul></div>
+    <div class="ann" data-ann="goals"></div>
+  </section>
+
+  <section class="unit" id="research" data-unit="Research &amp; retrieval layer">
+    <h3>Research &amp; retrieval layer<span class="tag settled">evidence-settled</span></h3>
+    <div class="purpose">Agentic news/web search, hard-filtered by date, feeding every forecasting pass.</div>
+    <p>Retrieval is the confirmed core of every competitive system; retrieval quality
+    moved accuracy more than model choice in published work. Two design commitments:
+    (1) retrieval is <b>date-filtered</b> so the agent only sees pre-forecast-time
+    information (leakage guard), and (2) it targets high-quality news sources
+    (AIA-style) rather than raw web.</p>
+    <div class="evi">Open cost question: paid data sources (news APIs, market data feeds)
+    are not yet budgeted &mdash; free tiers first.</div>
+    <div class="prompts"><div class="pt">Review prompts</div><ul>
+      <li>Any budget appetite for paid news/data APIs, or free-first until a rung is hit?</li>
+    </ul></div>
+    <div class="ann" data-ann="research"></div>
+  </section>
+
+  <section class="unit" id="aggregation" data-unit="Ensemble math (log-odds, mild extremization, Platt)">
+    <h3>Ensemble math<span class="tag settled">evidence-settled</span></h3>
+    <div class="purpose">How many forecasts become one number: log-odds pooling, mild extremization, Platt calibration.</div>
+    <p>Three stacked, separately-confirmed layers:</p>
+    <ul>
+      <li><b>Pool in log-odds space</b>, never average probabilities (Satop&auml;&auml; et al., validated on 1,300+ forecasters).</li>
+      <li><b>Extremize mildly or not at all</b> &mdash; the classic &radic;3 factor assumes independent information, but an LLM ensemble shares training data; shared information flips the optimum toward attenuation. Coefficient tuned on held-out backtest.</li>
+      <li><b>Platt-scale the output</b> to counter systematic LLM hedging (AIA's confirmed technique).</li>
+    </ul>
+    <p>Ensemble members are weighted by tracked performance &mdash; the mechanized version
+    of "tracking", the best-evidenced human intervention. Outputs keep 1% granularity;
+    rounding to 0.10 measurably hurt human superforecasters.</p>
+    <div class="prompts"><div class="pt">Review prompts</div><ul>
+      <li>Any objection to the math layer being fixed formulas initially (vs. a reasoning agent &mdash; see candidate E)?</li>
+    </ul></div>
+    <div class="ann" data-ann="aggregation"></div>
+  </section>
+
+  <section class="unit" id="market" data-unit="Market anchoring (be the additive third)">
+    <h3>Market anchoring — be the additive &#8531;<span class="tag settled">evidence-settled</span></h3>
+    <div class="purpose">Where a market/community price exists, we model the adjustment, not the level.</div>
+    <p>The strongest 2025 system (AIA) <i>loses</i> to market consensus alone
+    (Brier 0.126 vs 0.111) but a ~&#8531;-model/&#8532;-market ensemble <i>beats</i> the
+    market (0.106). Halawi found the same shape. So on liquid questions our agent's job
+    is to be additive information on top of the price &mdash; a humbling but confirmed
+    framing.</p>
+    <div class="evi">Consequence: on liquid questions the final number will usually sit
+    near the market's. The agent earns its keep on thin/absent markets and in the
+    adjustment.</div>
+    <div class="prompts"><div class="pt">Review prompts</div><ul>
+      <li>Comfortable that the system defers heavily to markets where they exist?</li>
+      <li>Does this change how interesting the project feels to you (edge vs. independence)?</li>
+    </ul></div>
+    <div class="ann" data-ann="market"></div>
+  </section>
+
+  <section class="unit" id="abstention" data-unit="Selective abstention">
+    <h3>Selective abstention<span class="tag settled">evidence-settled</span></h3>
+    <div class="purpose">The agent declines or defers on questions where it has no edge.</div>
+    <p>Halawi's system loses to the crowd overall but <b>beats it</b> when restricted to
+    questions with crowd uncertainty 0.3&ndash;0.7 and good retrieval. Every pipeline
+    pass therefore emits a confidence-in-forecast signal, and the system abstains (or
+    just submits the community prior) below threshold. "Knowing when not to forecast" is
+    a first-class feature, not a failure mode.</p>
+    <div class="prompts"><div class="pt">Review prompts</div><ul>
+      <li>OK with an agent that sometimes answers "no edge, declining"?</li>
+      <li>In tournament play (where abstaining may cost score), submit the market/community prior instead?</li>
+    </ul></div>
+    <div class="ann" data-ann="abstention"></div>
+  </section>
+
+  <section class="unit" id="updating" data-unit="Continuous re-forecasting">
+    <h3>Continuous re-forecasting<span class="tag settled">evidence-settled</span></h3>
+    <div class="purpose">Forecasts are living values, updated on news, market moves, and schedule — never one-shot.</div>
+    <p>Updating frequency is the <b>single strongest behavioral predictor</b> of human
+    forecasting accuracy (supers: 2.77&rarr;6.70 forecasts/question vs ~1.5). This
+    mechanizes trivially but has real infrastructure implications: a question lifecycle
+    store, news triggers, scheduled re-runs &mdash; and recurring inference cost per open
+    question.</p>
+    <div class="prompts"><div class="pt">Review prompts</div><ul>
+      <li>Any cost ceiling per question / per month we should design against?</li>
+    </ul></div>
+    <div class="ann" data-ann="updating"></div>
+  </section>
+
+  <section class="unit" id="explain" data-unit="Legible explanation as output contract">
+    <h3>Legible explanation as output contract<span class="tag default">default</span></h3>
+    <div class="purpose">The deliverable is a probability plus the argument for it — "here's why 23%".</div>
+    <p>Tournaments only score the number, so this is a deliberate product decision, not a
+    scoring requirement. If your decomposition graph (hypothesis C) earns its keep, the
+    explanation becomes a structured argument graph; otherwise structured prose
+    synthesized from the winning passes. Arguably the more valuable half of the product
+    for any real decision-making use.</p>
+    <div class="prompts"><div class="pt">Review prompts</div><ul>
+      <li>Confirm: explanation is core product, worth cost even though tournaments ignore it?</li>
+      <li>Who is the explanation for — just you, or eventually shareable output?</li>
+    </ul></div>
+    <div class="ann" data-ann="explain"></div>
+  </section>
+
+  <section class="unit" id="race" data-unit="The architecture race (A–E)">
+    <h3>The architecture race (A&ndash;E)<span class="tag default">default</span></h3>
+    <div class="purpose">Five candidate architectures compete on the harness; evidence, not preference, picks the winner.</div>
+    <div class="tbl"><table>
+      <tr><th>ID</th><th>Architecture</th><th>Standing from evidence</th></tr>
+      <tr><td>A</td><td>Single pass: retrieval + superforecaster-checklist prompt</td><td>Baseline; near-human in published work</td></tr>
+      <tr><td>B</td><td>Diverse ensemble &rarr; log-odds pool &rarr; mild extremization</td><td>12-LLM ensemble already matches a 925-person crowd</td></tr>
+      <tr><td>C</td><td>Recursive decomposition graph (your founding idea)</td><td>Open &mdash; no direct evidence either way</td></tr>
+      <tr><td>D</td><td>Market-anchored: price as prior, model the edge</td><td>Confirmed additive as ensemble component</td></tr>
+      <tr><td>E</td><td>Supervisor-reconciled agentic scaffold + calibration (AIA-style)</td><td>Confirmed 2025 SOTA</td></tr>
+    </table></div>
+    <p>Race order: A first (it is also the live tournament entry), then B; E only if B's
+    formula aggregation looks like the bottleneck; C and D in parallel with B. Predicted
+    finish (to be checked against reality): <b>E &gt; B &asymp; D &gt; A &gt; C</b> on Brier;
+    C first on legibility. Adoption rule: beat baseline A with statistical significance
+    on backtest, confirmed directionally live.</p>
+    <div class="prompts"><div class="pt">Review prompts</div><ul>
+      <li>Right set of candidates? Anything you'd add or cut before we spend harness time?</li>
+      <li>OK racing E late, or do you want the SOTA pattern attempted earlier?</li>
+    </ul></div>
+    <div class="ann" data-ann="race"></div>
+  </section>
+
+  <section class="unit" id="hypothesis-c" data-unit="Hypothesis C — the decomposition graph">
+    <h3>Hypothesis C: your decomposition graph<span class="tag open">open — steer this</span></h3>
+    <div class="purpose">The project's founding intuition, deliberately framed as a hypothesis rather than the design.</div>
+    <p>Your original idea &mdash; recursively decompose the question into knowable
+    sub-facts, source data for each, weight by competence, bubble probabilities up a
+    graph. The research pass found <b>no direct evidence for or against it</b>: the
+    theoretical risk (conjunctive chains compound errors) stands but is undemonstrated,
+    and our backtest would be among the first direct tests. Design guards if built:
+    depth caps, a per-node outside-view anchor, and a holistic sanity-check against any
+    multiplied chain.</p>
+    <p>Three possible fates, all currently live: (1) wins on accuracy outright,
+    (2) loses on Brier but becomes the <b>explanation layer</b> over B/E's number,
+    (3) serves as a diversity generator feeding ensemble B.</p>
+    <div class="prompts"><div class="pt">Review prompts</div><ul>
+      <li>Happy with "hypothesis to test" framing, or do you want it more central regardless of Brier?</li>
+      <li>If it loses on accuracy, is the explanation-layer role a satisfying home for it?</li>
+    </ul></div>
+    <div class="ann" data-ann="hypothesis-c"></div>
+  </section>
+
+  <section class="unit" id="scope" data-unit="Non-goals &amp; domain">
+    <h3>Non-goals &amp; domain<span class="tag default">default</span></h3>
+    <div class="purpose">What we deliberately are not building — each one reversible, but currently binding.</div>
+    <ul>
+      <li><b>No trading.</b> Score is Brier against resolutions, not P&amp;L on Kalshi/Polymarket &mdash; despite the ACX article's $35&rarr;$2M hook being a trading story.</li>
+      <li><b>No fine-tuning / training.</b> (See core bet.)</li>
+      <li><b>No long-horizon oracle questions</b> ("AGI by 2035?") &mdash; we start where feedback and reference classes exist: binary, resolvable, months-scale questions.</li>
+      <li><b>Domain-agnostic within that</b> &mdash; no vertical specialization (geopolitics, econ, sports) chosen yet, though specialization is a known lever.</li>
+    </ul>
+    <div class="prompts"><div class="pt">Review prompts</div><ul>
+      <li>Is no-trading permanent principle or deferred ambition?</li>
+      <li>Any domain you actually care most about forecasting? (Would shape question selection and retrieval sources.)</li>
+      <li>Long-horizon questions: permanently out, or a later phase?</li>
+    </ul></div>
+    <div class="ann" data-ann="scope"></div>
+  </section>
+
+  <section class="unit" id="next" data-unit="Open items &amp; the next move">
+    <h3>Open items &amp; the next move<span class="tag open">open — steer this</span></h3>
+    <div class="purpose">What's explicitly undecided, and what we build next (Phase 3).</div>
+    <p><b>Undecided, awaiting the race:</b> formula vs. supervisor aggregation (B vs E);
+    the decomposition graph's fate; ensemble size, extremization coefficient, and member
+    weights (tuned empirically).</p>
+    <p><b>Proposed next move</b> &mdash; two builds in parallel:</p>
+    <ul>
+      <li><b>Frozen-snapshot scraper</b>: start archiving unresolved questions + contemporaneous search results <i>now</i>; this accrues a leakage-proof backtest set whose value compounds with calendar time.</li>
+      <li><b>Baseline bot</b> via the official metac-bot-template, entered into the Metaculus AI Benchmark for live scoring (rung 1).</li>
+    </ul>
+    <div class="prompts"><div class="pt">Review prompts</div><ul>
+      <li>Green-light both Phase 3 builds as described?</li>
+      <li>Anything in this review you want resolved before any code is written?</li>
+    </ul></div>
+    <div class="ann" data-ann="next"></div>
+  </section>
+</main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var KEY = "arh:superforecaster-vision:v1";
+  var STATUSES = [
+    ["", "— no status —"],
+    ["agree", "Agree"],
+    ["agree_notes", "Agree with notes"],
+    ["revise", "Revise"],
+    ["reject", "Reject"],
+    ["discuss", "Discuss"]
+  ];
+  var LABELS = {};
+  STATUSES.forEach(function (s) { LABELS[s[0]] = s[1]; });
+  var DOTS = { agree: "✓", agree_notes: "✓*", revise: "✎",
+    reject: "✗", discuss: "?" };
+
+  function load() {
+    try { return JSON.parse(localStorage.getItem(KEY) || "{}"); }
+    catch (e) { return {}; }
+  }
+  function save(state) { localStorage.setItem(KEY, JSON.stringify(state)); }
+  var state = load();
+
+  function fmtStamp(ts) {
+    if (!ts) return "";
+    return "saved " + new Date(ts).toLocaleString();
+  }
+
+  var panels = document.querySelectorAll("[data-ann]");
+  panels.forEach(function (panel) {
+    var id = panel.getAttribute("data-ann");
+    var section = panel.closest("section.unit");
+    var entry = state[id] || {};
+
+    var selWrap = document.createElement("div");
+    var selLabel = document.createElement("label");
+    selLabel.setAttribute("for", "sel-" + id);
+    selLabel.textContent = "Status";
+    var sel = document.createElement("select");
+    sel.id = "sel-" + id;
+    STATUSES.forEach(function (s) {
+      var o = document.createElement("option");
+      o.value = s[0]; o.textContent = s[1];
+      sel.appendChild(o);
+    });
+    sel.value = entry.status || "";
+    selWrap.appendChild(selLabel); selWrap.appendChild(sel);
+
+    var noteWrap = document.createElement("div");
+    var noteLabel = document.createElement("label");
+    noteLabel.setAttribute("for", "note-" + id);
+    noteLabel.textContent = "Notes";
+    var ta = document.createElement("textarea");
+    ta.id = "note-" + id;
+    ta.placeholder = "Your feedback on this decision…";
+    ta.value = entry.note || "";
+    noteWrap.appendChild(noteLabel); noteWrap.appendChild(ta);
+
+    var foot = document.createElement("div");
+    foot.className = "foot";
+    var stamp = document.createElement("span");
+    stamp.className = "stamp";
+    stamp.textContent = fmtStamp(entry.ts);
+    var clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.className = "clear1";
+    clearBtn.textContent = "Clear this note";
+    foot.appendChild(stamp); foot.appendChild(clearBtn);
+
+    panel.appendChild(selWrap); panel.appendChild(noteWrap); panel.appendChild(foot);
+
+    function paint() {
+      section.classList.remove("s-agree", "s-agree_notes", "s-revise", "s-reject", "s-discuss");
+      var st = (state[id] && state[id].status) || "";
+      if (st) section.classList.add("s-" + st);
+      var dot = document.querySelector('[data-dot="' + id + '"]');
+      if (dot) dot.textContent = st ? (DOTS[st] || "") : "";
+    }
+    function persist() {
+      var st = sel.value, note = ta.value;
+      if (!st && !note.trim()) { delete state[id]; }
+      else { state[id] = { status: st, note: note, ts: Date.now() }; }
+      save(state);
+      stamp.textContent = state[id] ? fmtStamp(state[id].ts) : "";
+      paint();
+    }
+    sel.addEventListener("change", persist);
+    var t = null;
+    ta.addEventListener("input", function () {
+      if (t) clearTimeout(t);
+      t = setTimeout(persist, 400);
+    });
+    clearBtn.addEventListener("click", function () {
+      sel.value = ""; ta.value = ""; persist();
+    });
+    paint();
+  });
+
+  function buildMarkdown() {
+    var lines = [];
+    lines.push("# Feedback on Superforecaster Vision");
+    lines.push("");
+    lines.push("- Source: `N:\\superforecaster\\docs\\VISION.md` (+ docs 00-03)");
+    lines.push("- Walkthrough: `N:\\superforecaster\\docs\\VISION-review.html`");
+    lines.push("- Mode: `signoff`");
+    lines.push("- Generated: " + new Date().toLocaleString());
+    lines.push("");
+    lines.push("## Section Feedback");
+    var any = false;
+    document.querySelectorAll("section.unit").forEach(function (section) {
+      var id = section.querySelector("[data-ann]").getAttribute("data-ann");
+      var entry = state[id];
+      if (!entry || (!entry.status && !(entry.note || "").trim())) return;
+      any = true;
+      var title = section.getAttribute("data-unit")
+        .replace(/&amp;/g, "&").replace(/&#8531;/g, "1/3");
+      lines.push("");
+      lines.push("### " + title);
+      lines.push("");
+      lines.push("- Status: " + (LABELS[entry.status || ""] || "—"));
+      if ((entry.note || "").trim()) {
+        lines.push("");
+        lines.push(entry.note.trim());
+      }
+    });
+    if (!any) {
+      lines.push("");
+      lines.push("_No sections annotated yet._");
+    }
+    return lines.join("\n");
+  }
+
+  var statusEl = document.getElementById("exportStatus");
+  function say(msg) {
+    statusEl.textContent = msg;
+    setTimeout(function () {
+      if (statusEl.textContent === msg) statusEl.textContent = "";
+    }, 4000);
+  }
+  function showPreview(md) {
+    var box = document.getElementById("previewBox");
+    var area = document.getElementById("previewArea");
+    area.value = md;
+    box.style.display = "block";
+    area.focus(); area.select();
+  }
+
+  document.getElementById("btnCopy").addEventListener("click", function () {
+    var md = buildMarkdown();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(md).then(function () {
+        say("Copied — paste into chat.");
+      }, function () { showPreview(md); say("Clipboard blocked — select & copy below."); });
+    } else { showPreview(md); say("Clipboard unavailable — select & copy below."); }
+  });
+  document.getElementById("btnPreview").addEventListener("click", function () {
+    var box = document.getElementById("previewBox");
+    if (box.style.display === "block") { box.style.display = "none"; return; }
+    showPreview(buildMarkdown());
+  });
+  document.getElementById("btnDownload").addEventListener("click", function () {
+    var blob = new Blob([buildMarkdown()], { type: "text/markdown" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "superforecaster-vision-feedback.md";
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+    say("Downloaded.");
+  });
+  document.getElementById("btnClearAll").addEventListener("click", function () {
+    if (!confirm("Clear all statuses and notes on this page?")) return;
+    state = {};
+    save(state);
+    document.querySelectorAll("[data-ann]").forEach(function (panel) {
+      panel.querySelector("select").value = "";
+      panel.querySelector("textarea").value = "";
+      panel.querySelector(".stamp").textContent = "";
+      var section = panel.closest("section.unit");
+      section.classList.remove("s-agree", "s-agree_notes", "s-revise", "s-reject", "s-discuss");
+    });
+    document.querySelectorAll("[data-dot]").forEach(function (d) { d.textContent = ""; });
+    say("All notes cleared.");
+  });
+})();
+</script>

@@ -1,0 +1,511 @@
+<title>Forecasting Architectures — Visual Explainer</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --sidebar: #18232b; --text: #1d2730;
+    --muted: #63717d; --line: #cfd8df; --blue: #1e6b96; --green: #35754b;
+    --gold: #8a651d; --red: #a13f3f; --blue-soft: #e3edf4; --green-soft: #e2efe7;
+    --gold-soft: #f4ecda; --red-soft: #f3e2e2;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.6 "Segoe UI", system-ui, sans-serif; }
+  .wrap { display: flex; min-height: 100vh; }
+  nav.side { position: sticky; top: 0; align-self: flex-start; height: 100vh;
+    overflow-y: auto; width: 250px; flex: 0 0 250px; background: var(--sidebar);
+    color: #d7e0e6; padding: 22px 18px; }
+  nav.side h1 { font-size: 16px; margin: 0 0 4px; color: #fff; line-height: 1.35; }
+  nav.side .sub { font-size: 12px; color: #8fa3af; margin-bottom: 16px; }
+  nav.side .grp { font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    color: #7d919d; margin: 16px 0 6px; }
+  nav.side a { display: block; color: #d7e0e6; text-decoration: none;
+    font-size: 13px; padding: 4px 6px; border-radius: 5px; }
+  nav.side a:hover { background: #24323c; }
+  main { flex: 1; padding: 28px 34px 90px; max-width: 900px; }
+  section { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;
+    scroll-margin-top: 12px; }
+  h2 { margin: 0 0 4px; font-size: 19px; }
+  h3 { margin: 18px 0 6px; font-size: 15.5px; }
+  .purpose { color: var(--muted); font-size: 13.5px; margin: 0 0 12px; }
+  p, li { font-size: 14.5px; }
+  ul { padding-left: 20px; }
+  .tag { display: inline-block; font-size: 11px; letter-spacing: .05em;
+    text-transform: uppercase; border-radius: 4px; padding: 2px 7px;
+    margin-left: 8px; vertical-align: 2px; }
+  .tag.settled { background: var(--green-soft); color: var(--green); }
+  .tag.open { background: var(--gold-soft); color: var(--gold); }
+  .tag.sota { background: var(--blue-soft); color: var(--blue); }
+  .callout { border-left: 3px solid var(--blue); background: #f2f6f9;
+    border-radius: 0 6px 6px 0; padding: 10px 14px; margin: 12px 0;
+    font-size: 13.5px; }
+  .callout.warn { border-left-color: var(--gold); background: #f8f3e7; }
+  .callout.you { border-left-color: var(--green); background: var(--green-soft); }
+  .diagram { margin: 14px 0; padding: 12px; background: #fbfcfd;
+    border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; }
+  .diagram svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  .tbl { overflow-x: auto; margin: 10px 0; }
+  table { border-collapse: collapse; font-size: 13.5px; min-width: 540px; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left;
+    vertical-align: top; }
+  th { background: #eef2f5; font-weight: 600; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  code { background: #eef2f5; border-radius: 4px; padding: 1px 5px;
+    font-size: 13px; }
+  /* SVG shared styles */
+  svg text { font-family: "Segoe UI", system-ui, sans-serif; fill: var(--text); }
+  svg .box { fill: #fff; stroke: var(--line); stroke-width: 1.4; rx: 6; }
+  svg .box-blue { fill: var(--blue-soft); stroke: var(--blue); }
+  svg .box-green { fill: var(--green-soft); stroke: var(--green); }
+  svg .box-gold { fill: var(--gold-soft); stroke: var(--gold); }
+  svg .box-red { fill: var(--red-soft); stroke: var(--red); }
+  svg .arrow { stroke: #7d919d; stroke-width: 1.6; fill: none;
+    marker-end: url(#arr); }
+  svg .lbl { font-size: 12.5px; }
+  svg .lbl-b { font-size: 12.5px; font-weight: 600; }
+  svg .lbl-s { font-size: 11px; fill: var(--muted); }
+  svg .lbl-big { font-size: 15px; font-weight: 700; }
+</style>
+
+<div class="wrap">
+<nav class="side" aria-label="Explainer navigation">
+  <h1>Forecasting Architectures</h1>
+  <div class="sub">Visual explainer &amp; concept primers</div>
+  <div class="grp">The concepts</div>
+  <a href="#brier">Brier score — how forecasts are graded</a>
+  <a href="#calibration">Calibration &amp; confidence</a>
+  <a href="#tournament">Tournament play</a>
+  <a href="#pooling">Combining forecasts (log-odds)</a>
+  <a href="#extremize">Extremization &amp; Platt scaling</a>
+  <div class="grp">The architectures</div>
+  <a href="#arch-a">A — Checklist single-pass</a>
+  <a href="#arch-b">B — Diverse ensemble</a>
+  <a href="#arch-c">C — Decomposition pyramid (yours)</a>
+  <a href="#arch-d">D — Market as weighted input</a>
+  <a href="#arch-e">E — Supervisor scaffold</a>
+  <div class="grp">Wrap-up</div>
+  <a href="#compare">Side-by-side comparison</a>
+</nav>
+
+<main>
+  <!-- SVG arrow marker defs, shared by all diagrams -->
+  <svg width="0" height="0" style="position:absolute">
+    <defs>
+      <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+        markerHeight="7" orient="auto-start-reverse">
+        <path d="M 0 1 L 9 5 L 0 9 z" fill="#7d919d"/>
+      </marker>
+    </defs>
+  </svg>
+
+  <section id="brier">
+    <h2>Brier score — how forecasts are graded</h2>
+    <p class="purpose">The single number that decides every architecture race in this project.</p>
+    <p>After a question resolves, take your probability, take what actually happened
+    (1 if it happened, 0 if not), and square the gap:</p>
+    <p style="text-align:center"><code>Brier = (your probability − outcome)²</code> &nbsp;&mdash;&nbsp; <b>lower is better</b>, 0 is perfect.</p>
+    <div class="tbl"><table>
+      <tr><th>You said</th><th>It happened?</th><th>Score</th><th>Verdict</th></tr>
+      <tr><td class="num">90%</td><td>Yes</td><td class="num">(1 − 0.9)² = <b>0.01</b></td><td>Excellent</td></tr>
+      <tr><td class="num">90%</td><td>No</td><td class="num">(0 − 0.9)² = <b>0.81</b></td><td>Punished hard for confident wrongness</td></tr>
+      <tr><td class="num">50%</td><td>Either</td><td class="num"><b>0.25</b></td><td>The "always shrug" baseline</td></tr>
+      <tr><td class="num">70%</td><td>Yes</td><td class="num"><b>0.09</b></td><td>Good</td></tr>
+    </table></div>
+    <p>Scores get averaged over many questions. The reference points to keep in mind:
+    always answering 50% scores <b>0.25</b>; a good human crowd scores around
+    <b>0.15–0.19</b>; the best published AI systems live in the <b>0.10–0.20</b> range
+    depending on question difficulty. The gaps between good designs are tiny —
+    hundredths — which is why we need hundreds of questions to tell two architectures
+    apart, and why intuition can't judge them.</p>
+    <div class="callout">The squaring is what makes this an honesty machine: saying 95%
+    when you should say 70% feels bolder, but across many questions it bleeds score.
+    The best long-term strategy is to report exactly what you believe — which is why
+    Brier is the standard for measuring forecasting skill.</div>
+  </section>
+
+  <section id="calibration">
+    <h2>Calibration &amp; confidence</h2>
+    <p class="purpose">The property you said is extremely important — here's how it's measured.</p>
+    <p><b>Calibration</b> means: of all the times you say "70%", the thing happens about
+    70% of the time. It's checked by bucketing past forecasts and comparing each
+    bucket's stated probability to its actual hit rate:</p>
+    <div class="diagram">
+      <svg viewBox="0 0 300 240" role="img" aria-label="Reliability diagram showing a perfectly calibrated diagonal and an overconfident curve below it">
+        <line x1="45" y1="200" x2="270" y2="200" stroke="#cfd8df" stroke-width="1.4"/>
+        <line x1="45" y1="200" x2="45" y2="20" stroke="#cfd8df" stroke-width="1.4"/>
+        <text x="157" y="228" text-anchor="middle" class="lbl-s">what you said (%)</text>
+        <text x="16" y="110" text-anchor="middle" class="lbl-s" transform="rotate(-90 16 110)">what happened (%)</text>
+        <line x1="45" y1="200" x2="270" y2="20" stroke="#35754b" stroke-width="1.6" stroke-dasharray="5 4"/>
+        <text x="196" y="52" class="lbl-s" fill="#35754b">perfect calibration</text>
+        <path d="M 45 200 C 120 190, 200 150, 270 60" stroke="#a13f3f" stroke-width="2" fill="none"/>
+        <text x="130" y="185" class="lbl-s" fill="#a13f3f">overconfident (typical)</text>
+        <circle cx="188" cy="139" r="3.5" fill="#a13f3f"/>
+        <text x="196" y="150" class="lbl-s" fill="#a13f3f">said 65%, happened ~54%</text>
+      </svg>
+    </div>
+    <p>This is separate from <b>confidence in a specific forecast</b> — how much signal
+    the system actually found for this question (was there good data? did the passes
+    agree?). Per your feedback, every forecast the system produces will carry both: the
+    probability and an explicit confidence level. Low confidence never hides — in
+    personal use it's flagged; in tournament play (where skipping costs points) the
+    system falls back to submitting the community's number rather than a low-signal guess.</p>
+  </section>
+
+  <section id="tournament">
+    <h2>Tournament play — what it is and why we're in it</h2>
+    <p class="purpose">The phrase from the abstention discussion, unpacked.</p>
+    <p><b>Metaculus</b> is a forecasting platform: it publishes resolvable questions
+    ("Will X happen by date Y?"), thousands of people submit probabilities, questions
+    resolve, and everyone's accumulated accuracy is scored. A <b>tournament</b> is a
+    scored season of such questions. The <b>AI Benchmark tournament</b> is the
+    bots-only division: you register a bot, it must forecast every question in the
+    season via API, and its scores are compared against other bots and against
+    Metaculus <b>Pro forecasters</b> (paid human superforecasters — currently still
+    beating every bot).</p>
+    <p>Why we bother: it's the only external, un-gameable scorecard. Our backtests could
+    fool us (data leaks, cherry-picking); a live tournament can't — the answers don't
+    exist yet. The tournament is <b>mode 3</b> of the system, existing to validate the
+    engine that modes 1 and 2 (your decision support and reports) run on.</p>
+    <div class="callout warn">One consequence for abstention: tournament rules score
+    every question, so "declining to forecast" means taking a default score — usually
+    bad. That's why the design says: in tournament mode, when confidence is low, submit
+    the community/market prior (a respectable neutral answer) instead of abstaining.
+    In your personal modes there's no such constraint — the honest answer "I don't have
+    enough signal" is allowed and valuable.</div>
+  </section>
+
+  <section id="pooling">
+    <h2>Combining forecasts — why not just average?</h2>
+    <p class="purpose">The math layer you asked to understand as it goes. Here's the intuition, no formulas required.</p>
+    <p>Suppose two forecasting passes come back with <b>95%</b> and <b>50%</b>.</p>
+    <ul>
+      <li><b>Plain averaging</b> says (95 + 50) / 2 = <b>72.5%</b>. But this systematically
+      drags confident answers toward the mushy middle — averaged forecasts are provably
+      <i>underconfident</i>.</li>
+      <li><b>Log-odds pooling</b> converts each probability to <i>odds</i> first
+      (95% = 19-to-1; 50% = 1-to-1), averages in that space, and converts back:
+      about <b>81%</b>. The confident view keeps more of its weight.</li>
+    </ul>
+    <p>The intuition: probability is a squashed scale — the difference between 95% and
+    99% is <i>huge</i> evidence-wise (5× less doubt), while 48% vs 52% is nearly
+    nothing. Odds-space respects that; percent-space doesn't. On real tournament data
+    (1,300+ forecasters), odds-space pooling reliably beats plain averaging. So the
+    engine always combines forecasts in log-odds space — one of the few free wins the
+    literature offers.</p>
+    <p>Two refinements stack on top, both applied <i>after</i> pooling — see next section.</p>
+  </section>
+
+  <section id="extremize">
+    <h2>Extremization &amp; Platt scaling — the two dials after pooling</h2>
+    <p class="purpose">Both are single-number corrections learned from past performance.</p>
+    <h3>Extremization — push the pooled answer further from 50%… sometimes</h3>
+    <p>When several forecasters each saw <i>different private evidence</i> and all lean
+    the same way, the truth is usually more extreme than their average — each was
+    hedging for what they didn't know, but collectively they knew it. So classic
+    aggregation <i>extremizes</i>: pooled 75% becomes, say, 85%.</p>
+    <div class="callout warn">The catch that matters for us: this only works when the
+    forecasters' information is <b>independent</b>. Our ensemble members are LLM passes
+    sharing the same training data and much of the same retrieval — mostly
+    <i>shared</i> information. The evidence says: with shared information, extremize
+    mildly or not at all (sometimes even soften). So our extremization dial starts
+    near "off" and is tuned on backtest data, not copied from the human-crowd literature.</div>
+    <h3>Platt scaling — fix the model's systematic bias</h3>
+    <p>LLMs habitually hedge toward 50% (trained to be cautious). Platt scaling is a
+    tiny correction curve fitted on past resolved questions: "when this system says
+    65%, reality behaves like 74% — so stretch its outputs accordingly." It's the last
+    step in the pipeline and one of the confirmed techniques in the current best
+    system. Think of it as calibrating the instrument after manufacturing.</p>
+  </section>
+
+  <section id="arch-a">
+    <h2>A — Checklist single-pass<span class="tag settled">baseline</span></h2>
+    <p class="purpose">One careful pass, following the human superforecaster's checklist. Everything else is measured against this.</p>
+    <div class="diagram">
+      <svg viewBox="0 0 740 150" role="img" aria-label="Linear pipeline: question to research to checklist reasoning to probability">
+        <rect x="10" y="45" width="120" height="60" class="box"/>
+        <text x="70" y="70" text-anchor="middle" class="lbl-b">Question</text>
+        <text x="70" y="88" text-anchor="middle" class="lbl-s">"Will X happen</text>
+        <text x="70" y="100" text-anchor="middle" class="lbl-s">by June 30?"</text>
+        <line x1="130" y1="75" x2="168" y2="75" class="arrow"/>
+        <rect x="170" y="45" width="150" height="60" class="box box-blue"/>
+        <text x="245" y="70" text-anchor="middle" class="lbl-b">Research</text>
+        <text x="245" y="88" text-anchor="middle" class="lbl-s">news + data,</text>
+        <text x="245" y="100" text-anchor="middle" class="lbl-s">date-filtered</text>
+        <line x1="320" y1="75" x2="358" y2="75" class="arrow"/>
+        <rect x="360" y="30" width="230" height="90" class="box box-blue"/>
+        <text x="475" y="52" text-anchor="middle" class="lbl-b">Checklist reasoning</text>
+        <text x="475" y="70" text-anchor="middle" class="lbl-s">1. find reference class → base rate</text>
+        <text x="475" y="85" text-anchor="middle" class="lbl-s">2. adjust with case evidence</text>
+        <text x="475" y="100" text-anchor="middle" class="lbl-s">3. argue against yourself</text>
+        <line x1="590" y1="75" x2="628" y2="75" class="arrow"/>
+        <rect x="630" y="45" width="100" height="60" class="box box-green"/>
+        <text x="680" y="72" text-anchor="middle" class="lbl-big">23%</text>
+        <text x="680" y="92" text-anchor="middle" class="lbl-s">+ confidence</text>
+      </svg>
+    </div>
+    <p>The "checklist" is the distilled human craft: anchor on how often things like
+    this <i>generally</i> happen (the outside view), then adjust for what's specific
+    here (the inside view), then actively try to prove yourself wrong. Published work
+    shows this single-pass recipe already gets near human-crowd level.</p>
+    <p><b>Role in the race:</b> it's the baseline and the first live tournament entry —
+    cheapest to run (~$0.17/question at Sonnet), simplest to debug, and every other
+    candidate must beat it to earn its complexity.</p>
+  </section>
+
+  <section id="arch-b">
+    <h2>B — Diverse ensemble<span class="tag settled">strong evidence</span></h2>
+    <p class="purpose">Many deliberately-different passes, combined with the math from the primers above.</p>
+    <div class="diagram">
+      <svg viewBox="0 0 740 330" role="img" aria-label="Fan-out of five diverse passes pooled in log-odds space then calibrated">
+        <rect x="10" y="20" width="130" height="50" class="box"/>
+        <text x="75" y="42" text-anchor="middle" class="lbl-b">Question</text>
+        <text x="75" y="58" text-anchor="middle" class="lbl-s">+ shared research</text>
+        <path d="M 140 45 C 200 45, 200 45, 238 45" class="arrow"/>
+        <path d="M 140 45 C 200 45, 190 105, 238 105" class="arrow"/>
+        <path d="M 140 45 C 200 45, 190 165, 238 165" class="arrow"/>
+        <path d="M 140 45 C 200 45, 190 225, 238 225" class="arrow"/>
+        <path d="M 140 45 C 200 45, 190 285, 238 285" class="arrow"/>
+        <rect x="240" y="22" width="185" height="46" class="box box-blue"/>
+        <text x="332" y="41" text-anchor="middle" class="lbl">Pass 1 · outside-view first</text>
+        <text x="332" y="58" text-anchor="middle" class="lbl-b">18%</text>
+        <rect x="240" y="82" width="185" height="46" class="box box-blue"/>
+        <text x="332" y="101" text-anchor="middle" class="lbl">Pass 2 · inside-view first</text>
+        <text x="332" y="118" text-anchor="middle" class="lbl-b">30%</text>
+        <rect x="240" y="142" width="185" height="46" class="box box-blue"/>
+        <text x="332" y="161" text-anchor="middle" class="lbl">Pass 3 · professional skeptic</text>
+        <text x="332" y="178" text-anchor="middle" class="lbl-b">15%</text>
+        <rect x="240" y="202" width="185" height="46" class="box box-blue"/>
+        <text x="332" y="221" text-anchor="middle" class="lbl">Pass 4 · different sources</text>
+        <text x="332" y="238" text-anchor="middle" class="lbl-b">25%</text>
+        <rect x="240" y="262" width="185" height="46" class="box box-blue"/>
+        <text x="332" y="281" text-anchor="middle" class="lbl">Pass 5 · different model</text>
+        <text x="332" y="298" text-anchor="middle" class="lbl-b">21%</text>
+        <path d="M 425 45 C 480 45, 470 150, 508 155" class="arrow"/>
+        <path d="M 425 105 C 470 105, 470 150, 508 155" class="arrow"/>
+        <path d="M 425 165 C 470 165, 470 160, 508 160" class="arrow"/>
+        <path d="M 425 225 C 470 225, 470 170, 508 165" class="arrow"/>
+        <path d="M 425 285 C 480 285, 470 175, 508 170" class="arrow"/>
+        <rect x="510" y="125" width="120" height="80" class="box box-gold"/>
+        <text x="570" y="150" text-anchor="middle" class="lbl-b">Pool in</text>
+        <text x="570" y="166" text-anchor="middle" class="lbl-b">log-odds space</text>
+        <text x="570" y="188" text-anchor="middle" class="lbl-s">+ mild extremize</text>
+        <line x1="630" y1="165" x2="648" y2="165" class="arrow"/>
+        <rect x="650" y="140" width="80" height="50" class="box box-gold"/>
+        <text x="690" y="161" text-anchor="middle" class="lbl">Platt</text>
+        <text x="690" y="176" text-anchor="middle" class="lbl">calibrate</text>
+        <rect x="640" y="230" width="100" height="55" class="box box-green"/>
+        <text x="690" y="255" text-anchor="middle" class="lbl-big">21%</text>
+        <text x="690" y="274" text-anchor="middle" class="lbl-s">+ confidence</text>
+        <line x1="690" y1="190" x2="690" y2="228" class="arrow"/>
+      </svg>
+    </div>
+    <p>The diversity is engineered, not accidental: different reasoning orders,
+    different personas, different retrieval, even different underlying models. The
+    spread of the answers is itself the confidence signal — five passes landing on
+    15–30% is a very different situation from five landing on 20–22%.</p>
+    <p>Your "competence weighting" instinct lives here too: passes that historically
+    score better get more weight in the pool (the mechanized version of "tracking",
+    the best-evidenced human intervention).</p>
+    <p><b>Evidence:</b> a 12-model ensemble already matched a 925-person human crowd in
+    a live tournament. This is the literature's predicted winner on pure accuracy.
+    ~$1.40/question at Sonnet.</p>
+  </section>
+
+  <section id="arch-c">
+    <h2>C — Decomposition pyramid<span class="tag open">your idea — open hypothesis</span></h2>
+    <p class="purpose">Your founding intuition, drawn as you described it: break the question down to bedrock, bubble confidence back up.</p>
+    <div class="diagram">
+      <svg viewBox="0 0 740 430" role="img" aria-label="Pyramid: primary question on top, sub-questions below, bedrock facts at the bottom, probabilities bubbling upward">
+        <rect x="245" y="15" width="250" height="62" class="box box-green"/>
+        <text x="370" y="38" text-anchor="middle" class="lbl-b">Will X happen by June 30?</text>
+        <text x="370" y="58" text-anchor="middle" class="lbl-big">23%</text>
+        <text x="370" y="71" text-anchor="middle" class="lbl-s">confidence: medium</text>
+        <line x1="220" y1="130" x2="330" y2="80" class="arrow"/>
+        <line x1="370" y1="130" x2="370" y2="80" class="arrow"/>
+        <line x1="520" y1="130" x2="412" y2="80" class="arrow"/>
+        <rect x="105" y="132" width="220" height="58" class="box box-blue"/>
+        <text x="215" y="152" text-anchor="middle" class="lbl">Q1: Does side A want the deal?</text>
+        <text x="215" y="170" text-anchor="middle" class="lbl-b">70% · conf: high</text>
+        <rect x="345" y="132" width="180" height="58" class="box box-blue"/>
+        <text x="435" y="152" text-anchor="middle" class="lbl">Q2: Can it clear review</text>
+        <text x="435" y="166" text-anchor="middle" class="lbl">in time?</text>
+        <text x="435" y="182" text-anchor="middle" class="lbl-b">45% · conf: low</text>
+        <rect x="545" y="132" width="180" height="58" class="box box-blue"/>
+        <text x="635" y="152" text-anchor="middle" class="lbl">Q3: Any veto players?</text>
+        <text x="635" y="170" text-anchor="middle" class="lbl-b">75% no · conf: med</text>
+        <line x1="120" y1="255" x2="185" y2="192" class="arrow"/>
+        <line x1="280" y1="255" x2="240" y2="192" class="arrow"/>
+        <line x1="435" y1="255" x2="435" y2="192" class="arrow"/>
+        <line x1="620" y1="255" x2="632" y2="192" class="arrow"/>
+        <rect x="40" y="257" width="165" height="70" class="box"/>
+        <text x="122" y="277" text-anchor="middle" class="lbl">Bedrock: public statements,</text>
+        <text x="122" y="292" text-anchor="middle" class="lbl">meeting records</text>
+        <text x="122" y="312" text-anchor="middle" class="lbl-s">sourced fact · conf: high</text>
+        <rect x="225" y="257" width="165" height="70" class="box"/>
+        <text x="307" y="277" text-anchor="middle" class="lbl">Bedrock: base rate —</text>
+        <text x="307" y="292" text-anchor="middle" class="lbl">similar deals close 62%</text>
+        <text x="307" y="312" text-anchor="middle" class="lbl-s">reference class · conf: med</text>
+        <rect x="410" y="257" width="150" height="70" class="box"/>
+        <text x="485" y="277" text-anchor="middle" class="lbl">Bedrock: median</text>
+        <text x="485" y="292" text-anchor="middle" class="lbl">review = 9 months</text>
+        <text x="485" y="312" text-anchor="middle" class="lbl-s">data · conf: high</text>
+        <rect x="580" y="257" width="145" height="70" class="box"/>
+        <text x="652" y="277" text-anchor="middle" class="lbl">Bedrock: no filings,</text>
+        <text x="652" y="292" text-anchor="middle" class="lbl">no objections yet</text>
+        <text x="652" y="312" text-anchor="middle" class="lbl-s">absence of evidence · conf: low</text>
+        <text x="28" y="368" class="lbl-s">⬆ probabilities and confidence BUBBLE UP: each level's answer is computed from the level below,</text>
+        <text x="28" y="384" class="lbl-s">with explicit and/or structure (Q1 AND Q2 AND Q3 must hold → multiply; alternatives → add).</text>
+        <rect x="28" y="396" width="690" height="2" fill="#cfd8df"/>
+        <text x="28" y="418" class="lbl-s" fill="#a13f3f">⚠ the known risk: multiplying a chain of estimates compounds their errors — 80% × 80% × 80% = 51%,</text>
+        <text x="28" y="430" class="lbl-s" fill="#a13f3f">and if each 80% was really 85%, the truth was 61%. Guards: depth caps + sanity-check vs a holistic estimate.</text>
+      </svg>
+    </div>
+    <div class="callout you"><b>Confirming your description back to you:</b> yes — what
+    you described is exactly this. Hierarchical breakdown of the primary question into
+    prerequisite questions, recursively, down to a bedrock of researchable facts and
+    base rates; then confidence and probability scores from the bottom of the pyramid
+    combine upward to produce the final number. In the literature this family is
+    called Fermi decomposition / Bayesian-network forecasting. Your version's
+    distinctive feature is the per-node confidence riding alongside each probability.</div>
+    <p><b>Where the evidence stands:</b> genuinely open. Our research pass specifically
+    hunted for studies testing whether this improves or hurts calibration — and found
+    <i>no confirmed evidence either way</i>. The theoretical worry is error compounding
+    (bottom of the diagram); the design guards are depth caps, an outside-view anchor
+    at every node, and never trusting a long multiplied chain without a holistic
+    cross-check. Our backtest will be among the first direct tests.</p>
+    <p><b>Three ways it can win</b>, even if it loses on raw Brier: (1) outright
+    accuracy; (2) as the <b>explanation layer</b> — this diagram <i>is</i> a legible
+    argument for the number, which no other candidate naturally produces; (3) as a
+    diversity generator feeding ensemble B (a decomposition-based pass thinks
+    differently from a holistic pass).</p>
+  </section>
+
+  <section id="arch-d">
+    <h2>D — Market as a weighted input<span class="tag settled">confirmed component</span></h2>
+    <p class="purpose">Reframed per your feedback: the market price is another data point — potentially heavily weighted, never the sole reliance.</p>
+    <div class="diagram">
+      <svg viewBox="0 0 740 210" role="img" aria-label="Market price and engine forecast entering a learned weighted blend">
+        <rect x="20" y="25" width="200" height="62" class="box box-gold"/>
+        <text x="120" y="47" text-anchor="middle" class="lbl-b">Market / community price</text>
+        <text x="120" y="66" text-anchor="middle" class="lbl-big">30%</text>
+        <text x="120" y="80" text-anchor="middle" class="lbl-s">(when one exists)</text>
+        <rect x="20" y="115" width="200" height="62" class="box box-blue"/>
+        <text x="120" y="137" text-anchor="middle" class="lbl-b">Our engine (A/B/C/E)</text>
+        <text x="120" y="156" text-anchor="middle" class="lbl-big">18%</text>
+        <text x="120" y="170" text-anchor="middle" class="lbl-s">independent research</text>
+        <path d="M 220 56 C 290 56, 290 90, 338 96" class="arrow"/>
+        <path d="M 220 146 C 290 146, 290 112, 338 106" class="arrow"/>
+        <rect x="340" y="63" width="210" height="76" class="box box-gold"/>
+        <text x="445" y="87" text-anchor="middle" class="lbl-b">Weighted blend</text>
+        <text x="445" y="105" text-anchor="middle" class="lbl-s">weights LEARNED from backtests</text>
+        <text x="445" y="121" text-anchor="middle" class="lbl-s">(evidence hints ~⅓ us / ⅔ market)</text>
+        <line x1="550" y1="101" x2="598" y2="101" class="arrow"/>
+        <rect x="600" y="72" width="110" height="58" class="box box-green"/>
+        <text x="655" y="98" text-anchor="middle" class="lbl-big">26%</text>
+        <text x="655" y="118" text-anchor="middle" class="lbl-s">+ confidence</text>
+      </svg>
+    </div>
+    <p>Markets aggregate thousands of self-interested forecasters, which makes the
+    price a genuinely strong signal — the best published system <i>loses</i> to the
+    market head-to-head but <i>wins</i> when blended with it, meaning the AI adds real
+    information the market missed. Your framing is exactly how we'll build it: the
+    price enters the pipeline as one more input with a <b>learned</b> weight. If
+    backtests say weight it heavily, we weight it heavily; on questions with no market
+    (many of the ones you'll care about personally), the engine stands alone — which
+    is why D is a component, not the whole system.</p>
+  </section>
+
+  <section id="arch-e">
+    <h2>E — Supervisor-reconciled scaffold<span class="tag sota">2025 state of the art</span></h2>
+    <p class="purpose">Ensemble B, but the combining formula is replaced by a reasoning agent that reads the arguments.</p>
+    <div class="diagram">
+      <svg viewBox="0 0 740 300" role="img" aria-label="Passes feeding a supervisor agent that reconciles arguments before calibration">
+        <rect x="15" y="20" width="170" height="52" class="box box-blue"/>
+        <text x="100" y="41" text-anchor="middle" class="lbl">Pass 1 → 18%</text>
+        <text x="100" y="58" text-anchor="middle" class="lbl-s">+ its full argument</text>
+        <rect x="15" y="90" width="170" height="52" class="box box-blue"/>
+        <text x="100" y="111" text-anchor="middle" class="lbl">Pass 2 → 30%</text>
+        <text x="100" y="128" text-anchor="middle" class="lbl-s">+ its full argument</text>
+        <rect x="15" y="160" width="170" height="52" class="box box-blue"/>
+        <text x="100" y="181" text-anchor="middle" class="lbl">Pass 3 → 15%</text>
+        <text x="100" y="198" text-anchor="middle" class="lbl-s">+ its full argument</text>
+        <path d="M 185 46 C 250 46, 240 120, 288 125" class="arrow"/>
+        <path d="M 185 116 C 240 116, 240 128, 288 130" class="arrow"/>
+        <path d="M 185 186 C 250 186, 240 145, 288 138" class="arrow"/>
+        <rect x="290" y="70" width="270" height="130" class="box box-gold"/>
+        <text x="425" y="94" text-anchor="middle" class="lbl-b">Supervisor agent (strong model)</text>
+        <text x="425" y="116" text-anchor="middle" class="lbl-s">reads every argument and reconciles:</text>
+        <text x="425" y="134" text-anchor="middle" class="lbl-s">"Passes 1 and 3 both lean on the same poll —</text>
+        <text x="425" y="149" text-anchor="middle" class="lbl-s">that's one datum, not two. Pass 2 found news</text>
+        <text x="425" y="164" text-anchor="middle" class="lbl-s">the others missed. Weighing accordingly…"</text>
+        <text x="425" y="188" text-anchor="middle" class="lbl-b">reconciled: 24%</text>
+        <line x1="560" y1="135" x2="598" y2="135" class="arrow"/>
+        <rect x="600" y="110" width="90" height="50" class="box box-gold"/>
+        <text x="645" y="131" text-anchor="middle" class="lbl">Platt</text>
+        <text x="645" y="146" text-anchor="middle" class="lbl">calibrate</text>
+        <line x1="645" y1="160" x2="645" y2="208" class="arrow"/>
+        <rect x="595" y="210" width="100" height="55" class="box box-green"/>
+        <text x="645" y="235" text-anchor="middle" class="lbl-big">24%</text>
+        <text x="645" y="254" text-anchor="middle" class="lbl-s">+ confidence</text>
+      </svg>
+    </div>
+    <p>The difference from B is subtle but important: B combines the <i>numbers</i>
+    with a formula; E has a strong model read the <i>reasoning</i> behind each number
+    and judge — spotting double-counted evidence, noticing when one pass found
+    something the others missed. That's something no formula can do. It's the
+    architecture of the current best published system (Bridgewater's AIA Forecaster,
+    which also pioneered the Platt-calibration step).</p>
+    <p><b>Trade-off:</b> the most expensive per question (every ensemble cost plus a
+    long-context supervisor call — roughly $2–3/question with an Opus supervisor). We
+    race it after B, and only if B's formula looks like the bottleneck.</p>
+  </section>
+
+  <section id="compare">
+    <h2>Side-by-side comparison</h2>
+    <p class="purpose">All five, one table. Predicted finish is the literature's guess — the backtest harness gets the final word.</p>
+    <div class="tbl"><table>
+      <tr><th></th><th>A · Checklist</th><th>B · Ensemble</th><th>C · Pyramid</th><th>D · Market blend</th><th>E · Supervisor</th></tr>
+      <tr><th>One-liner</th>
+        <td>One careful pass</td>
+        <td>Many diverse passes + math</td>
+        <td>Break down to bedrock, bubble up</td>
+        <td>Market price as weighted input</td>
+        <td>Ensemble + reasoning judge</td></tr>
+      <tr><th>Evidence</th>
+        <td>Near human-crowd (published)</td>
+        <td>Matched 925-person crowd</td>
+        <td>None either way — we'd be first</td>
+        <td>Confirmed additive to markets</td>
+        <td>Current published SOTA</td></tr>
+      <tr><th>~Cost / question</th>
+        <td class="num">$0.17</td>
+        <td class="num">$1.40</td>
+        <td class="num">$1–3 (depth-dependent)</td>
+        <td class="num">+$0 (reuses engine)</td>
+        <td class="num">$2–3</td></tr>
+      <tr><th>Explains itself?</th>
+        <td>Somewhat</td>
+        <td>Poorly (five arguments, one number)</td>
+        <td><b>Best by far</b> — the graph is the argument</td>
+        <td>Partially</td>
+        <td>Well (supervisor's reconciliation)</td></tr>
+      <tr><th>Main risk</th>
+        <td>Single point of failure</td>
+        <td>Members share blind spots</td>
+        <td>Error compounding in chains</td>
+        <td>Useless without a market</td>
+        <td>Cost; supervisor's own biases</td></tr>
+      <tr><th>Race order</th>
+        <td>1st (baseline + live entry)</td>
+        <td>2nd</td>
+        <td>with B</td>
+        <td>with B</td>
+        <td>after B, if formula is the bottleneck</td></tr>
+    </table></div>
+    <p>Predicted finish on accuracy: <b>E &gt; B ≈ D &gt; A &gt; C</b> — with C first on
+    explainability, and a real chance the final system is a hybrid: B/E producing the
+    number, C producing the explanation, D folding in the market where one exists.
+    That hybrid is, roughly, your original sketch with the evidence-backed math
+    underneath it.</p>
+  </section>
+</main>
+</div>
