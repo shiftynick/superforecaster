@@ -30,6 +30,19 @@ Every non-trivial change moves through six stages:
 | 5. **Verify** | Tests + lint + type-check green; behavior confirmed against the harness where applicable. **Web-app changes additionally require live browser verification**: the agent runs the app and manually exercises the relevant flows in a real browser — clicking through, inspecting rendered state, checking the console and network — not just passing unit tests | Agent verifies, reports faithfully |
 | 6. **Record** | Decision record written; merged with a descriptive commit | Agent records, human owns the history |
 
+## Human checkpoints — bounded autonomy
+
+Agents can now work for hours autonomously; on this project that autonomy is deliberately **bounded by pre-declared checkpoints** where work pauses for human verification, so the system never builds out in a direction the owner doesn't want.
+
+**Rules:**
+
+1. **Every plan declares its checkpoints up front.** Before implementation starts, the approved plan states where the agent will stop and what will be presented at each stop. No plan without pause points.
+2. **Vertical slice before broad build-out.** The first checkpoint of any sizable feature is a thin end-to-end demo — direction gets verified when correcting it is cheap, not after hours of elaboration.
+3. **Deviation = stop.** If implementation reveals the approved plan is wrong or a materially different approach is needed, the agent stops at that moment and surfaces the fork — it does not pick a direction and keep building.
+4. **Checkpoints deliver reviewable artifacts, not transcripts.** Each pause presents something verifiable in minutes: a running demo (browser-tested for web work), an annotated review page (the `review-round` pattern) for decision-heavy changes, or a concise diff summary with the decisions called out. The human's time is the scarce resource; checkpoints are designed for it.
+5. **Long-run cap.** Autonomous sessions don't run past their next declared checkpoint just because they can. Finishing early is fine; blowing through a checkpoint is not.
+6. **Decision-weight scaling.** Reversible, in-plan work flows freely between checkpoints; anything hard to reverse, outward-facing, or architecture-shaping waits for explicit sign-off even if a checkpoint isn't due.
+
 ## Visibility into decisions: ADRs
 
 Every significant decision gets an **Architecture Decision Record** — a short numbered file in `docs/adr/` stating context, the decision, alternatives considered, and consequences. The vision docs already work this way informally; ADRs make it systematic once code exists. Commits reference their ADR. Six months from now, "why does aggregation use a fixed coefficient?" has a findable, dated answer.
