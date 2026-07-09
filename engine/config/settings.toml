@@ -1,0 +1,59 @@
+# Superforecaster engine settings — the control panel.
+#
+# This one file holds all non-secret engine configuration: the config-over-code
+# rule in practice. Which model each task uses, how many tokens it may spend,
+# how much each model costs, where data is stored, and which tournaments to
+# forecast — all live here, never as literals buried in the logic.
+#
+# Secrets (tokens) never go here; they live in engine/.env by design.
+#
+# Any section may be omitted — the loader falls back to sensible defaults — so a
+# minimal file still works. Paths are resolved relative to the repo root (run
+# CLI commands from there).
+
+[data]
+snapshot_dir = "./data/snapshots"    # question snapshots (scraper output)
+forecast_dir = "./data/forecasts"    # forecast records
+
+[tournament]
+live = "summer-futureeval-2026"      # scored AIB tournament ($50k) — --live required
+sandbox = "bot-testing-area"         # unscored test tournament
+
+# [tasks.<name>] — one table per task type the engine performs.
+#   model      : the model id or alias to call.
+#   max_tokens : hard cap on the response length (required by the API).
+#   effort     : OPTIONAL. Omit for the CLI default. If set, must be one of
+#                "low" | "medium" | "high" — passed straight through to the
+#                provider CLI (Claude: --effort; Codex: model_reasoning_effort)
+#                to trade latency/cost for more careful reasoning.
+#   provider   : OPTIONAL. Which LLM backend runs the call. Defaults to
+#                "claude-cli" (the Claude Code CLI on the owner's subscription).
+#                Also supported: "codex-cli" (the Codex CLI on the owner's Codex
+#                subscription). More providers (OpenRouter) will be added later.
+
+[tasks.forecast_pass]
+provider = "claude-cli"
+model = "claude-sonnet-5"
+effort = "low"                       # testing default; raise for real runs
+max_tokens = 4096
+
+# Alternative: run the same task on the Codex subscription instead. Swap the
+# [tasks.forecast_pass] table above for this one (only one may be active).
+# Codex constrains its output to the forecast JSON Schema via --output-schema.
+# Leave model = "" to use the Codex CLI's own default model, or name one
+# explicitly (e.g. "gpt-5.1-codex"). Pricing is optional and cost is notional
+# under the subscription, so no [pricing.*] entry is required.
+# [tasks.forecast_pass]
+# provider = "codex-cli"
+# model = "gpt-5.1-codex"
+# effort = "low"
+# max_tokens = 4096
+
+# [pricing.<model>] — dollar cost per million tokens, used only to log spend.
+#   A model with no pricing table simply records cost as unknown (null). Under a
+#   subscription, pricing is optional and any logged cost is notional — it tracks
+#   quota draw, not dollars billed.
+
+[pricing.claude-sonnet-5]
+input_per_mtok = 3.0
+output_per_mtok = 15.0

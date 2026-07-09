@@ -9,6 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from superforecaster import cli
+from superforecaster.config import load_settings
 from superforecaster.llm import LlmResult
 from superforecaster.submission import SubmissionError
 
@@ -27,7 +28,15 @@ _FORECAST_JSON = (
 class _FakeLlm:
     """Stands in for the LLM client; returns one fixed forecast envelope."""
 
-    def run(self, system: str, prompt: str, model: str, max_tokens: int | None = None) -> LlmResult:
+    def run(
+        self,
+        system: str,
+        prompt: str,
+        model: str,
+        max_tokens: int | None = None,
+        json_schema: dict[str, object] | None = None,
+        effort: str | None = None,
+    ) -> LlmResult:
         return LlmResult(
             text=_FORECAST_JSON,
             input_tokens=1000,
@@ -95,12 +104,31 @@ def test_double_gate_live_tournament_without_live_exits(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.chdir(tmp_path)  # avoid picking up a stray .env
+    live_slug = load_settings().tournament.live
     result = runner.invoke(
         cli.app,
-        ["submit-tournament", "--tournament", cli.LIVE_TOURNAMENT, "--forecast-dir", str(tmp_path)],
+        ["submit-tournament", "--tournament", live_slug, "--forecast-dir", str(tmp_path)],
     )
     assert result.exit_code == 1
     assert "--live" in result.output
+
+
+def test_default_tournament_comes_from_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """With no --tournament flag, the sandbox slug comes from settings.toml."""
+    settings = tmp_path / "settings.toml"
+    settings.write_text(
+        '[tournament]\nlive = "scored-x"\nsandbox = "my-sandbox"\n\n'
+        '[tasks.forecast_pass]\nmodel = "claude-sonnet-5"\nmax_tokens = 4096\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SUPERFORECASTER_CONFIG", str(settings))
+    list_client = _install(monkeypatch, [fixtures.open_binary_post(101, 201)])
+
+    result = runner.invoke(cli.app, ["submit-tournament", "--forecast-dir", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert list_client.tournament == "my-sandbox"
 
 
 def test_dry_run_posts_nothing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -1,19 +1,28 @@
-"""Load per-task model settings and pricing from ``engine/config/models.toml``.
+"""Load all non-secret engine settings from ``engine/config/settings.toml``.
 
-Two things live in that TOML file and are read here:
+This one file is the engine's control panel — the config-over-code rule in
+practice. The forecasting code never names a model, token count, data directory,
+or tournament slug itself; it asks the loaders here for them. Secrets (API
+tokens) deliberately live elsewhere, in ``engine/.env``.
 
+Four things live in that TOML file and are read here:
+
+- **Data locations** (``[data]``): where snapshots and forecast records are
+  stored. :func:`load_settings` returns these as :class:`Path` values.
+- **Tournaments** (``[tournament]``): the scored ``live`` slug (a real,
+  money-scored entry) and the unscored ``sandbox`` slug. Also via
+  :func:`load_settings`.
 - **Task settings** (``[tasks.<name>]``): which model a task calls, its token
-  budget, and an optional "effort" level. This is the config-over-code rule in
-  practice — the forecasting code never names a model or token count itself; it
-  asks :func:`load_task_config` for them.
+  budget, and an optional "effort" level. Read by :func:`load_task_config`.
 - **Pricing** (``[pricing.<model>]``): dollars per million tokens, used only to
   turn a call's token counts into a logged cost. :func:`price_for` does that
   arithmetic and returns ``None`` when a model has no price on file.
 
 The config file is found relative to this source file by default
-(``src/superforecaster/config.py`` -> ``engine/config/models.toml``), but the
+(``src/superforecaster/config.py`` -> ``engine/config/settings.toml``), but the
 ``SUPERFORECASTER_CONFIG`` environment variable overrides that, and every
-function takes an explicit ``path`` for tests.
+function takes an explicit ``path`` for tests. Missing sections fall back to the
+built-in defaults below, so a minimal file (or none of a given section) works.
 """
 
 from __future__ import annotations
@@ -26,6 +35,13 @@ from typing import Literal
 
 Effort = Literal["low", "medium", "high"]
 _VALID_EFFORTS: frozenset[str] = frozenset({"low", "medium", "high"})
+
+# Built-in fallbacks used when a section (or the whole file) is absent. These are
+# the last link in the settings precedence chain and keep a minimal config valid.
+_DEFAULT_SNAPSHOT_DIR = "./data/snapshots"
+_DEFAULT_FORECAST_DIR = "./data/forecasts"
+_DEFAULT_LIVE_TOURNAMENT = "summer-futureeval-2026"
+_DEFAULT_SANDBOX_TOURNAMENT = "bot-testing-area"
 
 
 @dataclass(frozen=True)
@@ -49,19 +65,53 @@ class TaskModelConfig:
     provider: str = "claude-cli"
 
 
+@dataclass(frozen=True)
+class DataSettings:
+    """Where the engine reads and writes its files.
+
+    Attributes:
+        snapshot_dir: Directory of question snapshots (the scraper's output).
+        forecast_dir: Directory of forecast records.
+    """
+
+    snapshot_dir: Path
+    forecast_dir: Path
+
+
+@dataclass(frozen=True)
+class TournamentSettings:
+    """The Metaculus tournament slugs the engine forecasts against.
+
+    Attributes:
+        live: The scored (money) tournament — a run against it requires ``--live``.
+        sandbox: The unscored test tournament, safe to submit to freely.
+    """
+
+    live: str
+    sandbox: str
+
+
+@dataclass(frozen=True)
+class Settings:
+    """The non-secret engine settings, grouped by section."""
+
+    data: DataSettings
+    tournament: TournamentSettings
+
+
 def _default_config_path() -> Path:
-    """Locate ``engine/config/models.toml`` next to this package.
+    """Locate ``engine/config/settings.toml`` next to this package.
 
     Precedence: the ``SUPERFORECASTER_CONFIG`` environment variable, then the
     file resolved relative to this source file. This file lives at
     ``engine/src/superforecaster/config.py``; going up three parents lands on
-    ``engine/``, where ``config/models.toml`` sits.
+    ``engine/``, where ``config/settings.toml`` sits.
     """
     env = os.environ.get("SUPERFORECASTER_CONFIG")
     if env:
         return Path(env)
     engine_dir = Path(__file__).resolve().parents[2]
-    return engine_dir / "config" / "models.toml"
+    return engine_dir / "config" / "settings.toml"
 
 
 def _load_toml(path: Path | None) -> dict[str, object]:
@@ -119,6 +169,42 @@ def load_task_config(task: str, path: Path | None = None) -> TaskModelConfig:
         raise ValueError(f"[tasks.{task}] provider must be a non-empty string if set")
 
     return TaskModelConfig(model=model, max_tokens=max_tokens, effort=effort, provider=provider)
+
+
+def _str_field(table: object, key: str, default: str) -> str:
+    """Read a non-empty string ``key`` from a TOML table, else return ``default``."""
+    if isinstance(table, dict):
+        value = table.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return default
+
+
+def load_settings(path: Path | None = None) -> Settings:
+    """Return the engine :class:`Settings` from the config file.
+
+    Every section is optional: a missing ``[data]`` or ``[tournament]`` table (or
+    a missing field within one, or the whole file having neither) falls back to
+    the built-in defaults, so a minimal config still loads. The
+    ``SUPERFORECASTER_CONFIG`` env override and default-path resolution match
+    :func:`load_task_config` — both read the same ``settings.toml``.
+
+    Args:
+        path: Optional explicit config path (defaults to the resolved location).
+    """
+    data_raw = _load_toml(path)
+    data_table = data_raw.get("data")
+    tournament_table = data_raw.get("tournament")
+
+    data = DataSettings(
+        snapshot_dir=Path(_str_field(data_table, "snapshot_dir", _DEFAULT_SNAPSHOT_DIR)),
+        forecast_dir=Path(_str_field(data_table, "forecast_dir", _DEFAULT_FORECAST_DIR)),
+    )
+    tournament = TournamentSettings(
+        live=_str_field(tournament_table, "live", _DEFAULT_LIVE_TOURNAMENT),
+        sandbox=_str_field(tournament_table, "sandbox", _DEFAULT_SANDBOX_TOURNAMENT),
+    )
+    return Settings(data=data, tournament=tournament)
 
 
 def price_for(

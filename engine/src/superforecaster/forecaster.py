@@ -329,14 +329,33 @@ def run_forecast_pass(
     system = f"{system}\n\n{OUTPUT_FORMAT}"
     user_prompt = _build_user_prompt(snapshot)
 
+    # Advisory schema for providers that support server-side structured output
+    # (Codex CLI constrains its final message to it). Claude CLI ignores it and
+    # relies on the prompt-JSON extractor below, which stays the universal net.
+    schema = ForecastOutput.model_json_schema()
+
     results: list[LlmResult] = []
-    first = llm.run(system, user_prompt, task_config.model, task_config.max_tokens)
+    first = llm.run(
+        system,
+        user_prompt,
+        task_config.model,
+        task_config.max_tokens,
+        json_schema=schema,
+        effort=task_config.effort,
+    )
     results.append(first)
     try:
         output = _parse_output(first.text)
     except (json.JSONDecodeError, ValidationError) as first_error:
         retry_prompt = user_prompt + _retry_note(first_error)
-        second = llm.run(system, retry_prompt, task_config.model, task_config.max_tokens)
+        second = llm.run(
+            system,
+            retry_prompt,
+            task_config.model,
+            task_config.max_tokens,
+            json_schema=schema,
+            effort=task_config.effort,
+        )
         results.append(second)
         try:
             output = _parse_output(second.text)

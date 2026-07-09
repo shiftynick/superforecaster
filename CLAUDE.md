@@ -11,6 +11,7 @@ Personal forecasting system: give it a resolvable question, it researches and re
 | `docs/architecture-explainer.html` | Concept primers + architecture diagrams (keep in sync via `update-explainer` intent) |
 | `docs/adr/` | Architecture Decision Records — see its README for format; scaffold with the `new-adr` skill |
 | `engine/` | Python forecasting engine (uv project) |
+| `engine/config/settings.toml` | The engine control panel; all non-secret config lives here (secrets in `engine/.env`) |
 | `web/` | TypeScript web app (does not exist yet — see ADR-0001) |
 | `.claude/skills/` | Project skills — versioned process; prefer invoking/extending a skill over ad-hoc process |
 | `.agents/skills/` | **Byte-identical mirror of `.claude/skills/`** — Codex agents read this one. Any skill create/edit/delete MUST be applied to both directories in the same change; verify with a recursive hash compare before committing |

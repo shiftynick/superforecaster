@@ -53,9 +53,24 @@ class _FakeLlm:
         self._results = list(results)
         self.calls: list[dict[str, Any]] = []
 
-    def run(self, system: str, prompt: str, model: str, max_tokens: int | None = None) -> LlmResult:
+    def run(
+        self,
+        system: str,
+        prompt: str,
+        model: str,
+        max_tokens: int | None = None,
+        json_schema: dict[str, object] | None = None,
+        effort: str | None = None,
+    ) -> LlmResult:
         self.calls.append(
-            {"system": system, "prompt": prompt, "model": model, "max_tokens": max_tokens}
+            {
+                "system": system,
+                "prompt": prompt,
+                "model": model,
+                "max_tokens": max_tokens,
+                "json_schema": json_schema,
+                "effort": effort,
+            }
         )
         return self._results.pop(0)
 
@@ -177,6 +192,15 @@ def test_prompt_includes_key_fields_and_output_format() -> None:
     assert "OUTPUT FORMAT" in call["system"]
     assert call["model"] == "claude-sonnet-5"
     assert call["max_tokens"] == 4096
+    # No effort on the default CONFIG -> passed through as None.
+    assert call["effort"] is None
+
+
+def test_effort_passed_through_to_client() -> None:
+    cfg = TaskModelConfig(model="claude-sonnet-5", max_tokens=4096, effort="low")
+    client = _FakeLlm(_result(_fenced()))
+    run_forecast_pass(_snapshot(), client=client, config=cfg, now=NOW)
+    assert client.calls[0]["effort"] == "low"
 
 
 def test_cost_falls_back_to_pricing_when_cli_gives_none() -> None:
@@ -188,7 +212,7 @@ def test_cost_falls_back_to_pricing_when_cli_gives_none() -> None:
 
 
 def test_cost_none_for_unpriced_model(tmp_path: Path) -> None:
-    toml = tmp_path / "models.toml"
+    toml = tmp_path / "settings.toml"
     toml.write_text(
         '[tasks.forecast_pass]\nmodel = "mystery"\nmax_tokens = 100\n', encoding="utf-8"
     )

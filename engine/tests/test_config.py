@@ -1,4 +1,4 @@
-"""Tests for the model/pricing config loader."""
+"""Tests for the settings/model/pricing config loader."""
 
 from __future__ import annotations
 
@@ -6,7 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from superforecaster.config import TaskModelConfig, load_task_config, price_for
+from superforecaster.config import (
+    DataSettings,
+    Settings,
+    TaskModelConfig,
+    TournamentSettings,
+    load_settings,
+    load_task_config,
+    price_for,
+)
 
 _TOML = """\
 [tasks.forecast_pass]
@@ -29,9 +37,24 @@ output_per_mtok = 15.0
 """
 
 
+_FULL_TOML = """\
+[data]
+snapshot_dir = "./snaps"
+forecast_dir = "./casts"
+
+[tournament]
+live = "scored-2027"
+sandbox = "playpen"
+
+[tasks.forecast_pass]
+model = "claude-sonnet-5"
+max_tokens = 4096
+"""
+
+
 @pytest.fixture
 def config_path(tmp_path: Path) -> Path:
-    path = tmp_path / "models.toml"
+    path = tmp_path / "settings.toml"
     path.write_text(_TOML, encoding="utf-8")
     return path
 
@@ -76,7 +99,53 @@ def test_price_for_unpriced_model(config_path: Path) -> None:
 
 
 def test_repo_config_loads() -> None:
-    """The committed engine/config/models.toml must parse and define forecast_pass."""
+    """The committed engine/config/settings.toml must parse and define forecast_pass."""
     cfg = load_task_config("forecast_pass")
     assert cfg.model
     assert cfg.max_tokens > 0
+
+
+# --- Settings loader --------------------------------------------------------
+
+
+def test_load_settings_reads_sections(tmp_path: Path) -> None:
+    path = tmp_path / "settings.toml"
+    path.write_text(_FULL_TOML, encoding="utf-8")
+    settings = load_settings(path)
+    assert settings == Settings(
+        data=DataSettings(snapshot_dir=Path("./snaps"), forecast_dir=Path("./casts")),
+        tournament=TournamentSettings(live="scored-2027", sandbox="playpen"),
+    )
+
+
+def test_load_settings_defaults_when_sections_missing(config_path: Path) -> None:
+    # _TOML has [tasks] and [pricing] but no [data]/[tournament] -> all defaults.
+    settings = load_settings(config_path)
+    assert settings.data.snapshot_dir == Path("./data/snapshots")
+    assert settings.data.forecast_dir == Path("./data/forecasts")
+    assert settings.tournament.live == "summer-futureeval-2026"
+    assert settings.tournament.sandbox == "bot-testing-area"
+
+
+def test_load_settings_partial_section_fills_missing_field(tmp_path: Path) -> None:
+    path = tmp_path / "settings.toml"
+    path.write_text('[data]\nsnapshot_dir = "./only-snaps"\n', encoding="utf-8")
+    settings = load_settings(path)
+    assert settings.data.snapshot_dir == Path("./only-snaps")
+    # forecast_dir absent -> default.
+    assert settings.data.forecast_dir == Path("./data/forecasts")
+
+
+def test_load_settings_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "settings.toml"
+    path.write_text(_FULL_TOML, encoding="utf-8")
+    monkeypatch.setenv("SUPERFORECASTER_CONFIG", str(path))
+    settings = load_settings()  # no explicit path -> uses env
+    assert settings.tournament.sandbox == "playpen"
+
+
+def test_load_settings_repo_default_resolves() -> None:
+    """The committed settings.toml resolves via the default path and parses."""
+    settings = load_settings()
+    assert settings.tournament.live
+    assert settings.data.snapshot_dir

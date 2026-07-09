@@ -21,9 +21,9 @@ from typing import cast
 
 import typer
 
-from .config import load_task_config
+from .config import load_settings, load_task_config
 from .dotenv import load_dotenv as _load_dotenv
-from .forecast_store import DEFAULT_FORECAST_DIR, ForecastStore
+from .forecast_store import ForecastStore
 from .forecaster import ForecastRecord, run_forecast_pass
 from .llm import LlmClient, LlmError, check_provider_cli
 from .metaculus import MetaculusClient
@@ -36,11 +36,6 @@ app = typer.Typer(
     help="Scrape and inspect Metaculus question snapshots. Run from the repo root.",
 )
 
-_DEFAULT_DATA_DIR = "./data/snapshots"
-
-# Tournament slugs, verified during recon.
-LIVE_TOURNAMENT = "summer-futureeval-2026"
-SANDBOX_TOURNAMENT = "bot-testing-area"
 _BOT_TOKEN_ENV = "METACULUS_BOT_TOKEN"
 
 # One-line disclosure prefixed to every rationale comment, so a reader can see at
@@ -71,13 +66,18 @@ _CLAUDE_CLI_HELP = (
 
 
 def _resolve_data_dir(data_dir: Path | None) -> Path:
-    """Pick the snapshot directory: flag > ``SUPERFORECASTER_DATA_DIR`` > default."""
+    """Pick the snapshot directory by precedence.
+
+    Explicit ``--data-dir`` flag, then the ``SUPERFORECASTER_DATA_DIR`` env
+    override, then ``settings.toml`` ([data] snapshot_dir), then its built-in
+    fallback (all handled inside :func:`load_settings`).
+    """
     if data_dir is not None:
         return data_dir
     env = os.environ.get("SUPERFORECASTER_DATA_DIR")
     if env:
         return Path(env)
-    return Path(_DEFAULT_DATA_DIR)
+    return load_settings().data.snapshot_dir
 
 
 def _require_token() -> str:
@@ -241,13 +241,18 @@ _PostIdOption = typer.Option(
 
 
 def _resolve_forecast_dir(forecast_dir: Path | None) -> Path:
-    """Pick the forecast directory: flag > ``SUPERFORECASTER_FORECAST_DIR`` > default."""
+    """Pick the forecast directory by precedence.
+
+    Explicit ``--forecast-dir`` flag, then the ``SUPERFORECASTER_FORECAST_DIR``
+    env override, then ``settings.toml`` ([data] forecast_dir), then its built-in
+    fallback (all handled inside :func:`load_settings`).
+    """
     if forecast_dir is not None:
         return forecast_dir
     env = os.environ.get("SUPERFORECASTER_FORECAST_DIR")
     if env:
         return Path(env)
-    return Path(DEFAULT_FORECAST_DIR)
+    return load_settings().data.forecast_dir
 
 
 def _select_questions(
@@ -333,10 +338,10 @@ def forecast(
 
 @app.command("submit-tournament")
 def submit_tournament(
-    tournament: str = typer.Option(
-        SANDBOX_TOURNAMENT,
+    tournament: str | None = typer.Option(
+        None,
         "--tournament",
-        help="Tournament slug to forecast. Defaults to the unscored sandbox.",
+        help="Tournament slug to forecast. Defaults to the unscored sandbox from settings.toml.",
     ),
     max_questions: int = typer.Option(
         5, "--max-questions", help="Max open questions to forecast this run."
@@ -355,8 +360,12 @@ def submit_tournament(
     ever (already-submitted questions are skipped), and every live submission is
     paired with a mandatory rationale comment.
     """
+    # Tournament slugs come from settings.toml; --tournament overrides the default.
+    settings = load_settings()
+    tournament = tournament if tournament is not None else settings.tournament.sandbox
+
     # Double gate: the scored tournament must never be entered by accident.
-    if tournament == LIVE_TOURNAMENT and not live:
+    if tournament == settings.tournament.live and not live:
         typer.echo(
             f"Refusing to run against the scored tournament {tournament!r} without "
             "--live. This is a real, money-scored entry: re-run with --live once you "
