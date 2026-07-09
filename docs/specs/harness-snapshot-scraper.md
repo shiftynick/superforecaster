@@ -34,6 +34,14 @@ engine/src/superforecaster/
   cli.py           # typer entry point
 ```
 
+## Known issue: community prediction is account-gated (found 2026-07-09, first live scrape)
+
+The scraper's CP extraction is correct, but the Metaculus API returns `aggregations.recency_weighted.latest = null` on essentially every question for this account (verified across the full population and both endpoints, reveal times long past, `with_cp=true` honored but empty). The dedicated `/api/aggregation_explorer/` endpoint returns 403: *"Use of this endpoint is restricted. Please contact support@metaculus.com if you'd like to gain access."* Conclusion: aggregate/CP data requires elevated API access granted per account.
+
+**Impact:** none on the core mission (question archiving → resolution tracking → backtest data). Degrades the market-anchoring input (candidate D) and CP-based baselines until resolved.
+
+**Paths:** (a) email support@metaculus.com requesting aggregation access (researchers/AIB bot builders are the intended audience); (b) proceed without CP — re-scrapes will capture it automatically if access is later granted (extraction code already correct); (c) AIB tournament registration may confer access. Recommended: (a) + (b) in parallel.
+
 ## Declared checkpoints
 
 | # | Gate | Artifact for human review |
