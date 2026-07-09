@@ -3,7 +3,11 @@ name = "superforecaster"
 version = "0.0.1"
 description = "Forecasting engine: research, ensemble forecasting, aggregation, evaluation harness"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "httpx>=0.28.1",
+    "pydantic>=2.13.4",
+    "typer>=0.26.8",
+]
 
 [dependency-groups]
 dev = [
@@ -11,6 +15,7 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "pre-commit>=4",
+    "hypothesis>=6.156.4",
 ]
 
 [build-system]
