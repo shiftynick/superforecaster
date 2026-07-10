@@ -1,6 +1,6 @@
 # Spec: Baseline Tournament Bot (Candidate A, v0)
 
-- Status: in progress
+- Status: v0 complete; **live entry deferred** (B3 decision, 2026-07-09)
 - Date: 2026-07-09
 - Parent docs: [VISION.md](../VISION.md) (validation rung 1), [03-architecture-candidates.md](../03-architecture-candidates.md) (candidate A)
 
@@ -37,9 +37,18 @@ Retrieval, ensembles, market anchoring (CP is account-gated anyway), any other c
 | **B2** | Pipeline validation | Dry-run forecasts + rationales reviewed by owner on **non-tournament questions** (our scraped store and/or the unscored `bot-testing-area`) — human review is legal there and validates prompt quality without touching live questions |
 | **B3** | Autonomy decision | Owner decides the automation question (below) and green-lights live entry; from then on the bot runs **fully autonomously** on tournament questions — no per-forecast human review, by rule |
 
-## Open decision for the owner (at B3)
+## B3 decision (owner, 2026-07-09): defer live entry
 
-The 1.5-hour question windows mean real participation needs a **scheduled poller** (~every 20 min), which collides with the "manual kickoffs only" cost-control decision. Options: (a) scheduled task with hard cost caps (max forecasts/day, Sonnet-only — worst case a few dollars/day at ~5 questions/batch); (b) manual-only participation accepting we miss most questions (rung 1 becomes "infrastructure proven" rather than "meaningful score"); (c) defer live entry, validate on bot-testing-area only. Recommendation: (a) with caps.
+B2 passed (dry-run rationales approved: "V2 rationale is good for now"). On B3 the owner chose
+option (c): **live tournament entry is parked until the full frameworks exist** — at minimum
+retrieval, the ensemble pipeline (candidate B), and the backtest runner. Rationale: today's bot
+is a no-retrieval single-pass floor; a scored record with it teaches little, and the learning
+loop that matters now is backtests against our own accumulating resolutions. Re-entry target:
+the next AIB season (this season's forecasting ends 2026-09-06). A one-off **sandbox smoke test**
+on `bot-testing-area` (unscored) remains on the shelf to exercise the live submission path.
+
+Superseded options for the record: (a) scheduled poller with cost caps; (b) manual-only
+participation accepting missed questions.
 
 ## New external dependency (revised 2026-07-09, ADR-0002)
 
