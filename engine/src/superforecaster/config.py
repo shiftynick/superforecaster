@@ -118,6 +118,10 @@ class RetrievalSettings:
             bundle (and handed to the prompt). Longer bodies are truncated so
             forecast records stay reviewable.
         timeout_seconds: Per-request HTTP timeout for search and extraction.
+        reuse_research_max_age_hours: How many hours a cached research bundle
+            stays reusable. The ``forecast`` command reuses a saved bundle whose
+            ``retrieved_at`` is within this window instead of re-researching
+            (spending search credits). ``0`` disables reuse: always re-research.
     """
 
     news_provider: str = "asknews"
@@ -129,6 +133,7 @@ class RetrievalSettings:
     extract_min_words: int = 80
     max_doc_chars: int = 8000
     timeout_seconds: float = 20.0
+    reuse_research_max_age_hours: float = 6.0
 
 
 @dataclass(frozen=True)
@@ -271,6 +276,9 @@ def load_retrieval_settings(path: Path | None = None) -> RetrievalSettings:
         extract_min_words=_int_field(table, "extract_min_words", d.extract_min_words),
         max_doc_chars=_int_field(table, "max_doc_chars", d.max_doc_chars),
         timeout_seconds=_float_field(table, "timeout_seconds", d.timeout_seconds),
+        reuse_research_max_age_hours=_float_field(
+            table, "reuse_research_max_age_hours", d.reuse_research_max_age_hours
+        ),
     )
 
 

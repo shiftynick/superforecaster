@@ -87,6 +87,10 @@ output_per_mtok = 15.0
 #                                bundle and handed to the prompt (keeps records
 #                                reviewable); longer bodies are truncated.
 #   timeout_seconds            : per-request HTTP timeout (search + extraction).
+#   reuse_research_max_age_hours : how many hours a cached research bundle stays
+#                                reusable by the `forecast` command, so a failed
+#                                pass does not throw away paid-for search credits.
+#                                0 disables reuse: always re-research.
 
 [retrieval]
 news_provider = "asknews"
@@ -98,3 +102,4 @@ extract_min_chars = 500
 extract_min_words = 80
 max_doc_chars = 8000
 timeout_seconds = 20.0
+reuse_research_max_age_hours = 6.0

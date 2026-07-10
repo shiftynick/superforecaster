@@ -30,6 +30,7 @@ from .llm import LlmClient, LlmError, build_llm_client, check_provider_cli
 from .metaculus import MetaculusClient
 from .models import QuestionSnapshot, SkipPost
 from .research import ResearchBundle, run_research
+from .research_cache import ResearchCache
 from .search import SearchClient, build_search_client, read_asknews_credits_used
 from .store import SnapshotStore
 from .submission import SubmissionClient, SubmissionError
@@ -381,22 +382,38 @@ def forecast(
     # there is never a hard-coded absolute path.
     research_ctx = None if no_research else _open_research_context(snap_dir)
 
+    # Research bundles are persisted next to the quota file (same data root) so a
+    # failed forecast pass never throws away paid-for search credits, and a later
+    # run can reuse a fresh bundle instead of re-researching.
+    cache = None if no_research else ResearchCache(snap_dir.parent / "research")
+
     records: list[ForecastRecord] = []
+    failures: list[str] = []
     try:
         for snapshot in questions:
             bundle: ResearchBundle | None = None
-            if research_ctx is not None:
-                bundle = run_research(
-                    snapshot,
-                    research_ctx.llm,
-                    research_ctx.news,
-                    research_ctx.general,
-                    research_ctx.extractor,
-                    research_ctx.settings,
+            research_state = "off"
+            if research_ctx is not None and cache is not None:
+                bundle, research_state = _research_for_question(
+                    snapshot, research_ctx, cache, now=now
                 )
-            record = run_forecast_pass(snapshot, client=client, config=config, research=bundle)
+
+            try:
+                record = run_forecast_pass(snapshot, client=client, config=config, research=bundle)
+            except LlmError as exc:
+                failures.append(f"q{snapshot.question_id}: {exc}")
+                typer.echo(
+                    f"q{snapshot.question_id} (post {snapshot.post_id}): forecast FAILED ({exc})",
+                    err=True,
+                )
+                continue
+            if research_state == "cached":
+                # The bundle's credits were drawn when it was first built; this
+                # run drew none. Zero the record's draw so summaries and quota
+                # accounting never double-count a reused bundle.
+                record = record.model_copy(update={"research_search_credits": 0})
             records.append(record)
-            _echo_forecast_summary(record)
+            _echo_forecast_summary(record, research_state)
     finally:
         if research_ctx is not None:
             research_ctx.close()
@@ -406,19 +423,57 @@ def forecast(
     total_credits = sum(r.research_search_credits for r in records)
     mode = "blind" if no_research else "researched"
     typer.echo(
-        f"forecast ({mode}): n={len(records)} total_cost=${total_cost:.4f} "
-        f"search_credits={total_credits} (all dry-run)"
+        f"forecast ({mode}): n={len(records)} failed={len(failures)} "
+        f"total_cost=${total_cost:.4f} search_credits={total_credits} (all dry-run)"
     )
+    if failures:
+        raise typer.Exit(code=1)
 
 
-def _echo_forecast_summary(record: ForecastRecord) -> None:
+def _research_for_question(
+    snapshot: QuestionSnapshot,
+    research_ctx: _ResearchContext,
+    cache: ResearchCache,
+    *,
+    now: datetime,
+) -> tuple[ResearchBundle, str]:
+    """Return this question's research bundle and whether it was cached or fresh.
+
+    Reuses a cached bundle whose ``retrieved_at`` is within the configured
+    max-age window (``reuse_research_max_age_hours``; ``0`` disables reuse). On a
+    miss, runs fresh research and saves it to the cache *before* returning — so a
+    later forecast crash cannot lose the paid-for research.
+    """
+    max_age_hours = research_ctx.settings.reuse_research_max_age_hours
+    if max_age_hours > 0:
+        cached = cache.load(
+            snapshot.question_id,
+            max_age=timedelta(hours=max_age_hours),
+            now=now,
+        )
+        if cached is not None:
+            return cached, "cached"
+
+    bundle = run_research(
+        snapshot,
+        research_ctx.llm,
+        research_ctx.news,
+        research_ctx.general,
+        research_ctx.extractor,
+        research_ctx.settings,
+    )
+    cache.save(snapshot.question_id, bundle)
+    return bundle, "fresh"
+
+
+def _echo_forecast_summary(record: ForecastRecord, research_state: str) -> None:
     """Print one per-question forecast result line (id, probability, cost, sources)."""
     cost = "n/a" if record.cost_usd is None else f"${record.cost_usd:.4f}"
     sources = "-" if record.research is None else str(len(record.research.results))
     typer.echo(
         f"q{record.question_id} (post {record.post_id}): "
         f"p={record.probability:.2f} confidence={record.confidence} "
-        f"cost={cost} sources={sources}"
+        f"cost={cost} sources={sources} research={research_state}"
     )
 
 

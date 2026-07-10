@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ from superforecaster import cli
 from superforecaster.extract import TIER_HTTPX_TRAFILATURA, ExtractedDoc
 from superforecaster.llm import LlmResult
 from superforecaster.metaculus import MetaculusClient
+from superforecaster.research import ResearchBundle
 from superforecaster.search import SearchResult
 
 from . import fixtures
@@ -302,6 +304,223 @@ def test_forecast_with_research_default(monkeypatch: pytest.MonkeyPatch, tmp_pat
         "https://news.example/a",
         "https://web.example/b",
     }
+
+
+def _fresh_bundle() -> ResearchBundle:
+    from datetime import UTC, datetime
+
+    return ResearchBundle(
+        queries=["cached query"],
+        results=[
+            SearchResult(
+                url="https://cached.example/a",
+                title="Cached",
+                snippet="short",
+                published_at=None,
+                source_domain="cached.example",
+                provider="asknews",
+                raw={},
+            )
+        ],
+        docs=[],
+        tier_stats={},
+        search_credits_used=0,
+        retrieved_at=datetime.now(UTC),
+    )
+
+
+def test_forecast_reuses_cached_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    snap_dir = tmp_path / "snapshots"
+    fc_dir = tmp_path / "forecasts"
+    _seed_open_question(monkeypatch, snap_dir)
+
+    monkeypatch.setattr(cli, "_build_llm_client", lambda: _FakeLlm())
+    _install_research_fakes(monkeypatch)
+    _pass_cli_check(monkeypatch)
+
+    # Pre-seed a fresh cached bundle for question 201 (the fixture's question id).
+    from superforecaster.research_cache import ResearchCache
+
+    ResearchCache(tmp_path / "research").save(201, _fresh_bundle())
+
+    # run_research must NOT be called when a fresh bundle is on disk.
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise AssertionError("run_research called despite a fresh cached bundle")
+
+    monkeypatch.setattr(cli, "run_research", _boom)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "forecast",
+            "--data-dir",
+            str(snap_dir),
+            "--forecast-dir",
+            str(fc_dir),
+            "--closing-within-days",
+            "365",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "research=cached" in result.output
+
+    from superforecaster.forecast_store import ForecastStore
+
+    (stored,) = list(ForecastStore(fc_dir).iter_all())
+    assert stored.research is not None
+    assert stored.research.queries == ["cached query"]
+
+
+def test_forecast_setting_zero_bypasses_reuse(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    snap_dir = tmp_path / "snapshots"
+    fc_dir = tmp_path / "forecasts"
+    _seed_open_question(monkeypatch, snap_dir)
+
+    monkeypatch.setattr(cli, "_build_llm_client", lambda: _FakeLlm())
+    _install_research_fakes(monkeypatch)
+    _pass_cli_check(monkeypatch)
+
+    # A fresh bundle is on disk, but reuse is disabled -> must re-research.
+    from superforecaster.research_cache import ResearchCache
+
+    ResearchCache(tmp_path / "research").save(201, _fresh_bundle())
+
+    from superforecaster.config import RetrievalSettings
+
+    monkeypatch.setattr(
+        cli,
+        "load_retrieval_settings",
+        lambda: RetrievalSettings(reuse_research_max_age_hours=0),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "forecast",
+            "--data-dir",
+            str(snap_dir),
+            "--forecast-dir",
+            str(fc_dir),
+            "--closing-within-days",
+            "365",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "research=fresh" in result.output
+
+    from superforecaster.forecast_store import ForecastStore
+
+    (stored,) = list(ForecastStore(fc_dir).iter_all())
+    assert stored.research is not None
+    # The freshly-researched bundle (from the fakes), not the cached one.
+    assert stored.research.queries == ["rate cut news", "fomc statement"]
+
+
+def test_forecast_saves_bundle_before_failing_pass(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    snap_dir = tmp_path / "snapshots"
+    fc_dir = tmp_path / "forecasts"
+    _seed_open_question(monkeypatch, snap_dir)
+
+    from superforecaster.llm import LlmError
+
+    class _FailingLlm:
+        def run(self, *args: object, **kwargs: object) -> LlmResult:
+            raise LlmError("forecast blew up")
+
+    monkeypatch.setattr(cli, "_build_llm_client", lambda: _FailingLlm())
+    _install_research_fakes(monkeypatch)
+    _pass_cli_check(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "forecast",
+            "--data-dir",
+            str(snap_dir),
+            "--forecast-dir",
+            str(fc_dir),
+            "--closing-within-days",
+            "365",
+        ],
+    )
+    # The pass failed, so exit non-zero and no record stored...
+    assert result.exit_code == 1
+    assert "failed=1" in result.output
+
+    from superforecaster.forecast_store import ForecastStore
+
+    assert list(ForecastStore(fc_dir).iter_all()) == []
+    # ...but the paid-for research bundle survived on disk.
+    from superforecaster.research_cache import ResearchCache
+
+    saved = ResearchCache(tmp_path / "research").load(201, max_age=timedelta(hours=6))
+    assert saved is not None
+    assert saved.queries == ["rate cut news", "fomc statement"]
+
+
+def test_forecast_one_failure_still_stores_others(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Two open, soon-closing questions with distinct close times for stable order.
+    post_a = fixtures.open_binary_post(101, 201)
+    post_a["question"]["scheduled_close_time"] = "2026-08-01T00:00:00Z"
+    post_b = fixtures.open_binary_post(102, 202)
+    post_b["question"]["scheduled_close_time"] = "2026-08-02T00:00:00Z"
+    snap_dir = tmp_path / "snapshots"
+    fc_dir = tmp_path / "forecasts"
+    _install_fake(monkeypatch, [post_a, post_b])
+    runner.invoke(cli.app, ["scrape", "--data-dir", str(snap_dir)])
+
+    from superforecaster.llm import LlmError
+
+    class _FirstFailsLlm:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run(
+            self,
+            system: str,
+            prompt: str,
+            model: str,
+            max_tokens: int | None = None,
+            json_schema: dict[str, object] | None = None,
+            effort: str | None = None,
+        ) -> LlmResult:
+            self.calls += 1
+            if self.calls == 1:
+                raise LlmError("first question blew up")
+            return _FakeLlm().run(system, prompt, model, max_tokens, json_schema, effort)
+
+    monkeypatch.setattr(cli, "_build_llm_client", lambda: _FirstFailsLlm())
+    _pass_cli_check(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "forecast",
+            "--no-research",
+            "--data-dir",
+            str(snap_dir),
+            "--forecast-dir",
+            str(fc_dir),
+            "--closing-within-days",
+            "365",
+        ],
+    )
+    assert result.exit_code == 1  # a question failed
+    assert "failed=1" in result.output
+    assert "n=1" in result.output
+
+    from superforecaster.forecast_store import ForecastStore
+
+    stored = list(ForecastStore(fc_dir).iter_all())
+    # The second question still forecast and was stored despite the first failing.
+    assert len(stored) == 1
+    assert stored[0].question_id == 202
 
 
 def test_forecast_without_cli_exits(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
