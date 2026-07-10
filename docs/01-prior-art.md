@@ -63,6 +63,34 @@ The verification pass was hardest on this area — treat everything here as a le
 - **Known leakage failure modes** ([arXiv:2507.19477](https://arxiv.org/pdf/2507.19477)): (1) evaluating on events resolved before the model's cutoff, (2) retrieval mixing post-resolution documents into results. Both must be explicitly guarded in our harness.
 - ⚠️ **Refuted**: ForecastBench's "leakage-hardened by construction" claim and its specific superforecaster-vs-LLM Brier figures (0-3 each). Re-derive from the primary paper before using ForecastBench numbers.
 
+## 6. Field survey — what AIB competitors are building (added 2026-07-09)
+
+Source: Metaculus's ["What are other bots doing?"](https://www.metaculus.com/notebooks/43497/bot-plans/) notebook — self-descriptions from ~40 credit-applicant bots across Fall 2025 / Spring 2026 / Summer 2026. Self-reported plans, not verified results; several change plans mid-season. Read as a map of the competitive landscape, not as evidence of what works.
+
+**The commodity recipe.** The field has converged, and says so itself (aroswift: "Most bots this season and last seem to follow the same basic recipe"): retrieval (AskNews + Perplexity + Exa) → multiple forecasts diversified by model/temperature/prompt → median or log-odds aggregation → mild extremization → iterate on MiniBench's 2-week cycles. That recipe is our **candidate B**. Multi-agent debate/panel variants (a dozen bots) and supervisor-synthesizer patterns (**candidate E**) are also well-populated. Recursive decomposition (**candidate C**) exists but is rare: r2d2 (recursive Fermi decomposition with tractability stopping) and Blueberry Pi's EvoGraph (persistent evidence graph that routes research toward weak nodes) are the two serious implementations. Market anchoring (**candidate D**) appears mostly as one input among many (signal2noise, MASX, tejvn, WobblyBot), not as a dedicated anchor-and-adjust architecture.
+
+**Where we are genuinely differentiated** (nothing in the survey does these):
+
+1. **The architecture-level portfolio.** Everyone ensembles models/prompts *within* one architecture; nobody described ensembling *across architectures* with learned per-category weights. Our portfolio decision remains the distinctive bet.
+2. **Pre-registered evaluation discipline.** Several bots have feedback loops (Sloth's scoring ledger, VIGILJANUS's calibration reviews), but none described frozen-metric pre-registration or lessons-as-hypotheses-verified-on-backtest. Most iterate by MiniBench intuition — exactly the single-miss-patching failure mode our postmortem protocol guards against.
+3. Honesty requires noting: "personal forecasting platform with a bot arm" is *not* unique (Sloth/SlothAI, VIGILJANUS/SYGNITO, dtfr's centaur OSINT demo), and neither is any individual candidate A–E.
+
+**Ideas worth stealing** (grafts recorded in [03-architecture-candidates.md](03-architecture-candidates.md)):
+
+| Idea | From | What it is |
+|---|---|---|
+| Agreement-scaled extremization | pancratic-bot | Extremize only when independent lenses converge; pull toward uncertainty when they diverge. Turns our fixed extremization coefficient into a function of ensemble agreement — directly testable in candidate B's math |
+| Empirical per-bin recalibration + objectivity gate | aroswift, PressPause | Fit a recalibration map on own resolved forecasts (33% forecasts resolving true 20% of the time → shift that bin down), but first ask "is this probability mechanical?" (dice-odds questions must not be dragged toward historical base rates) |
+| Crux-resolution stacking | tejvn-bot | When ensemble members diverge sharply, a meta-model extracts the *crux* of disagreement and runs targeted research to resolve it before synthesizing — a smarter supervisor for candidate E |
+| Variance-based routing | amigon21/MiniSim | Measure ensemble variance first; low variance → one cheap call (deliberation adds noise), high variance → full expensive deliberation. Cost control that fits our config-over-code requirement |
+| Code execution for quantitative grounding | tejvn, aroswift, smingers | Let the forecaster write/run Python for base rates, distribution fitting, simulation — LLMs reasoning about numbers in prose make systematic arithmetic errors |
+| Diversity via reasoning frames, not temperature | MASX-AI, pancratic | Ensemble members anchored to *heterogeneous analytical lenses* (outside view / inside view / status-quo inertia; or doctrine-level: balance-of-power, prospect theory) rather than N identical prompts at different temperatures |
+| Resolution-source grounding | GreeneiBot2 | Fetch/screenshot the question's actual resolution links so the forecast reasons against the source that will decide it |
+| Status-quo lens + fragility test | pancratic, VIGILJANUS, RRRRRR-bot | Explicit "what happens if nothing changes" pass, plus "what would have to go wrong for this forecast to be wrong" — single-fragile-assumption forecasts get pulled toward uncertainty |
+| MC option-order debiasing | aroswift, PressPause | Multiple-choice is where bots reportedly lose most vs pros; shuffle option orders across runs and average, normalize in code not in-model. Not relevant until we do MC questions — parked |
+
+**Meta-lessons from the field** (consistent with our dossier): Metaculus's own finding that *SOTA model choice matters more than scaffolding* is repeated to applicants; CumulativeBot's writeup independently reports that a home-built deep-researcher was the source of "pretty much every hallucination" and agentic pipelines "expensive and underperformed" — supporting our choice of simple retrieval + strong models over elaborate agentic research, at least initially.
+
 ## Bottom line — evidence-ranked scaffold priorities
 
 1. **Retrieval + news search** (confirmed core of every competitive system)

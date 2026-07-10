@@ -47,6 +47,16 @@ The confirmed 2025 SOTA architecture (AIA Forecaster, [arXiv:2511.07678](https:/
 
 **We pursue all candidates and ensemble across them.** Rather than racing to crown one survivor, every candidate implements the common engine interface so its forecast (probability + confidence + trace) can join an **architecture-level pool** — the same log-odds machinery, one level up. The harness's job shifts from "pick the winner" to "learn each candidate's weight" (possibly per question category — the pyramid may earn weight on decomposable questions, market-anchoring on liquid ones). A candidate "losing" means its weight goes to ~zero, not that it gets deleted; it can still serve as explanation layer or diversity source. Build order below still matters for cost and baseline reasons, but the end state is an ensemble of architectures.
 
+## Grafts from the field survey (2026-07-09)
+
+Competitor ideas worth testing, from the AIB bot-plans survey ([01-prior-art.md §6](01-prior-art.md)). Each is a **hypothesis** — it enters a candidate only via a pre-registered backtest experiment (docs/02), never as a straight patch:
+
+- **B:** agreement-scaled extremization (extremize on lens convergence, attenuate on divergence — replaces the fixed coefficient); diversity via heterogeneous reasoning frames (outside-view / inside-view / status-quo-inertia lenses, domain doctrines) rather than temperature; variance-based routing (cheap single call when passes agree, full ensemble only on disagreement) as the cost lever.
+- **E:** crux-resolution stacking — on sharp divergence the supervisor extracts the crux of disagreement and commissions targeted research before reconciling.
+- **Calibration layer (all candidates):** empirical per-bin recalibration fit on our own resolved forecasts, gated by an objectivity check (mechanical-probability questions exempt).
+- **Cross-cutting retrieval/reasoning:** resolution-source grounding (fetch the links the question will actually resolve by); code execution for quantitative steps (base rates, distribution fits, simulations); fragility test ("what must go wrong for this forecast to be wrong" — single-fragile-assumption forecasts pulled toward uncertainty).
+- **Parked until MC questions:** option-order shuffling + in-code normalization (the field says multiple-choice is where bots bleed points vs pros).
+
 ## Race protocol
 
 - Common question set and retrieval budget (per docs/02)

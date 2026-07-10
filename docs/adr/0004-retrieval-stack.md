@@ -1,8 +1,8 @@
 # 0004 — Retrieval stack: AskNews + Tavily search, tiered local-first extraction
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-07-09
-- Decided by: agent-within-plan (research synthesis); awaiting owner sign-off at checkpoint
+- Decided by: human (owner approved at checkpoint C2, 2026-07-09)
 
 ## Context
 
