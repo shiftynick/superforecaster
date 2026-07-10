@@ -329,3 +329,79 @@ def test_read_asknews_credits_used_resets_on_rollover(tmp_path: Path) -> None:
 
 def test_read_asknews_credits_used_missing_file(tmp_path: Path) -> None:
     assert read_asknews_credits_used(tmp_path, today=lambda: date(2026, 7, 1)) == 0
+
+
+# --- AskNews throttle + 429 retry (free tier: 1 request / 2 seconds) ---------
+
+
+def test_asknews_spaces_consecutive_requests(tmp_path: Path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_asknews_body([_ASKNEWS_ARTICLE]))
+
+    clock = {"now": 100.0}
+    sleeps: list[float] = []
+
+    def fake_sleep(s: float) -> None:
+        sleeps.append(s)
+        clock["now"] += s
+
+    client = AskNewsClient(
+        "k",
+        quota_path=tmp_path / "q.json",
+        monthly_credit_cap=900,
+        transport=httpx.MockTransport(handler),
+        today=lambda: date(2026, 7, 10),
+        min_request_interval_s=2.1,
+        monotonic=lambda: clock["now"],
+        sleep=fake_sleep,
+    )
+    client.search("first", max_results=1)
+    assert sleeps == []  # first request goes straight through
+    client.search("second", max_results=1)  # zero time elapsed since the first
+    client.close()
+
+    assert len(sleeps) == 1 and sleeps[0] == pytest.approx(2.1)
+
+
+def test_asknews_retries_once_on_429(tmp_path: Path) -> None:
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429, headers={"Retry-After": "3"})
+        return httpx.Response(200, json=_asknews_body([_ASKNEWS_ARTICLE]))
+
+    sleeps: list[float] = []
+    client = AskNewsClient(
+        "k",
+        quota_path=tmp_path / "q.json",
+        monthly_credit_cap=900,
+        transport=httpx.MockTransport(handler),
+        today=lambda: date(2026, 7, 10),
+        monotonic=lambda: 0.0,
+        sleep=sleeps.append,
+    )
+    results = client.search("q", max_results=1)
+    client.close()
+
+    assert calls["n"] == 2 and len(results) == 1
+    assert 3.0 in sleeps  # honored Retry-After
+
+
+def test_asknews_second_429_is_search_error(tmp_path: Path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429)
+
+    client = AskNewsClient(
+        "k",
+        quota_path=tmp_path / "q.json",
+        monthly_credit_cap=900,
+        transport=httpx.MockTransport(handler),
+        today=lambda: date(2026, 7, 10),
+        monotonic=lambda: 0.0,
+        sleep=lambda s: None,
+    )
+    with pytest.raises(SearchError):
+        client.search("q", max_results=1)
+    client.close()

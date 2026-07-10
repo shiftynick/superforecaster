@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Callable
 from datetime import date, datetime
 from email.utils import parsedate_to_datetime
@@ -203,6 +204,9 @@ class AskNewsClient:
         timeout_s: float = 20.0,
         method: str = "nl",
         today: Callable[[], date] = date.today,
+        min_request_interval_s: float = 2.1,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         """Configure the client.
 
@@ -216,12 +220,21 @@ class AskNewsClient:
             method: AskNews search method; ``"nl"`` (natural-language) per recon.
             today: Returns the current date; injectable so tests can drive
                 month-rollover behaviour. Defaults to ``date.today``.
+            min_request_interval_s: Floor between consecutive requests from this
+                client. The AskNews free tier allows 1 request per 2 seconds;
+                bursting past that returns 429 (seen live 2026-07-10).
+            monotonic: Clock for the throttle; injectable for tests.
+            sleep: Sleeper for throttle/backoff waits; injectable for tests.
         """
         self._api_key = api_key
         self._quota_path = quota_path
         self._cap = monthly_credit_cap
         self._method = method
         self._today = today
+        self._min_interval = min_request_interval_s
+        self._monotonic = monotonic
+        self._sleep = sleep
+        self._last_request_at: float | None = None
         # NOTE: AskNews' OpenAPI spec documents a custom ``APIKey`` header, but
         # that returns 401 in practice. A plain Bearer token is what actually
         # works — verified live against the real key on 2026-07-09 (see the
@@ -306,7 +319,7 @@ class AskNewsClient:
             "method": self._method,
         }
         try:
-            response = self._client.get("/v1/news/search", params=params)
+            response = self._throttled_get("/v1/news/search", params)
             response.raise_for_status()
             payload = response.json()
         except httpx.HTTPError as exc:
@@ -332,6 +345,32 @@ class AskNewsClient:
             if isinstance(article, dict):
                 results.append(self._to_result(article))
         return results
+
+    def _throttled_get(self, path: str, params: dict[str, str | int]) -> httpx.Response:
+        """GET with a request-interval floor and one retry on 429.
+
+        The free tier allows 1 request per 2 seconds; we space requests to
+        respect that and, if a 429 still arrives (shared limiter state on the
+        server side), wait ``Retry-After`` (default 5s, capped 30s) and retry
+        once. A second 429 propagates to the normal error path.
+        """
+        now = self._monotonic()
+        if self._last_request_at is not None:
+            wait = self._min_interval - (now - self._last_request_at)
+            if wait > 0:
+                self._sleep(wait)
+        response = self._client.get(path, params=params)
+        self._last_request_at = self._monotonic()
+        if response.status_code == 429:
+            retry_after = response.headers.get("Retry-After", "")
+            try:
+                delay = min(float(retry_after), 30.0) if retry_after else 5.0
+            except ValueError:
+                delay = 5.0
+            self._sleep(max(delay, self._min_interval))
+            response = self._client.get(path, params=params)
+            self._last_request_at = self._monotonic()
+        return response
 
     @staticmethod
     def _to_result(article: dict[str, Any]) -> SearchResult:
