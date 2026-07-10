@@ -457,16 +457,17 @@ def forecast(
     # run can reuse a fresh bundle instead of re-researching.
     cache = None if no_research else ResearchCache(snap_dir.parent / "research")
 
-    # ``to_store`` holds every record persisted (ensemble members AND pooled);
     # ``summaries`` holds one record per question (the single pass, or the pooled
     # ensemble record) so cost/credit totals are counted exactly once — a pooled
     # record's cost/credits already sum its members, so summing members again
-    # would double-count.
-    to_store: list[ForecastRecord] = []
+    # would double-count. Records are PERSISTED PER QUESTION (an ensemble question
+    # is minutes of paid LLM time; a crash or kill mid-batch must not lose the
+    # questions already finished).
     summaries: list[ForecastRecord] = []
     failures: list[str] = []
     try:
         for snapshot in questions:
+            to_store: list[ForecastRecord] = []
             bundle: ResearchBundle | None = None
             research_state = "off"
             if research_ctx is not None and cache is not None:
@@ -488,6 +489,7 @@ def forecast(
                 )
                 if pooled is not None:
                     summaries.append(pooled)
+                fc_store.append(to_store)
                 continue
 
             try:
@@ -504,14 +506,12 @@ def forecast(
                 # run drew none. Zero the record's draw so summaries and quota
                 # accounting never double-count a reused bundle.
                 record = record.model_copy(update={"research_search_credits": 0})
-            to_store.append(record)
+            fc_store.append([record])
             summaries.append(record)
             _echo_forecast_summary(record, research_state)
     finally:
         if research_ctx is not None:
             research_ctx.close()
-
-    fc_store.append(to_store)
     total_cost = sum(r.cost_usd for r in summaries if r.cost_usd is not None)
     total_credits = sum(r.research_search_credits for r in summaries)
     mode = "ensemble" if ensemble else ("blind" if no_research else "researched")
