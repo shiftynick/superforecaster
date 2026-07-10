@@ -1,4 +1,4 @@
-# 0003 — Multi-provider model layer: Claude CLI + Codex CLI, OpenRouter planned
+# 0003 — Multi-provider model layer: Claude CLI + Codex CLI + OpenRouter
 
 - Status: accepted
 - Date: 2026-07-09
@@ -15,7 +15,7 @@ The LLM layer (`llm.py`) is a **provider registry behind one protocol**: `LlmCli
 Providers, in order of adoption:
 1. **`claude-cli`** — Claude subscription (ADR-0002). Ignores `json_schema` (prompt-JSON + parse).
 2. **`codex-cli`** — Codex subscription via `codex exec` headless mode (verified live, codex-cli 0.140.0): JSONL events (`item.completed` → `agent_message` text; `turn.completed` → usage), `--output-schema <file>` for schema-constrained final output, `-m` for model, read-only sandbox, `stdin=DEVNULL` mandatory (blocks otherwise), run in a neutral empty cwd (else it ingests repo context — ~18k tokens observed on a trivial prompt).
-3. **`openrouter`** (planned, not yet built) — metered API for model breadth beyond the two subscriptions (Gemini, Llama, etc.), wanted for maximum ensemble diversity. Will be an HTTP client behind the same protocol; requires its own key and per-model pricing entries.
+3. **`openrouter`** (implemented 2026-07-09) — metered HTTPS API for model breadth beyond the two subscriptions (Gemini, Llama, etc.), for maximum ensemble diversity. Unlike the CLIs it is a plain HTTP client (`httpx` with an injectable `MockTransport`, no subprocess): POST `/chat/completions` keyed by `OPENROUTER_API_KEY`, `model` required (no default), `max_tokens` honored, `effort` → the `reasoning` param, `json_schema` → structured-output `response_format` with a one-shot retry-without-schema on an unsupported-model 4xx. Cost is real dollars from `usage.cost` (the pricing table is only a fallback), and the Metaculus-donated tournament credits arrive on an OpenRouter key.
 
 ## Alternatives considered
 

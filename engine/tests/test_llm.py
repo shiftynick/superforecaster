@@ -12,6 +12,7 @@ import os
 import subprocess
 from typing import Any
 
+import httpx
 import pytest
 
 from superforecaster.config import TaskModelConfig
@@ -19,6 +20,7 @@ from superforecaster.llm import (
     ClaudeCliClient,
     CodexCliClient,
     LlmError,
+    OpenRouterClient,
     build_llm_client,
     check_provider_cli,
 )
@@ -186,8 +188,8 @@ def test_build_llm_client_claude_cli() -> None:
 
 
 def test_build_llm_client_unknown_provider() -> None:
-    cfg = TaskModelConfig(model="m", max_tokens=100, provider="openrouter")
-    with pytest.raises(LlmError, match="openrouter"):
+    cfg = TaskModelConfig(model="m", max_tokens=100, provider="gemini-api")
+    with pytest.raises(LlmError, match="gemini-api"):
         build_llm_client(cfg)
 
 
@@ -473,3 +475,190 @@ def test_check_provider_cli_codex_delegates(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(llm, "check_codex_cli", lambda path="codex": True)
     cfg = TaskModelConfig(model="m", max_tokens=100, provider="codex-cli")
     assert check_provider_cli(cfg) is True
+
+
+# --- OpenRouter client (HTTPS API, MockTransport — no live network) ----------
+
+
+def _openrouter_payload(**overrides: Any) -> dict[str, Any]:
+    """A realistic OpenRouter chat-completions reply, overridable per test."""
+    base: dict[str, Any] = {
+        "id": "gen-abc",
+        "choices": [
+            {
+                "finish_reason": "stop",
+                "message": {"role": "assistant", "content": '{"probability": 0.4}'},
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 4590,
+            "completion_tokens": 42,
+            "total_tokens": 4632,
+            "cost": 0.0025,
+        },
+    }
+    base.update(overrides)
+    return base
+
+
+class _RecordingTransport(httpx.BaseTransport):
+    """MockTransport-style seam: records each request and returns canned replies.
+
+    ``responder`` is called with the parsed request body and the 0-based attempt
+    index; it returns ``(status_code, json_body)``. This lets a single test drive
+    the retry-without-schema path (attempt 0 → 400, attempt 1 → 200).
+    """
+
+    def __init__(
+        self, responder: Any, *, status: int = 200, body: dict[str, Any] | None = None
+    ) -> None:
+        self._responder = responder
+        self._status = status
+        self._body = body if body is not None else _openrouter_payload()
+        self.requests: list[dict[str, Any]] = []
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        parsed = json.loads(request.content.decode("utf-8"))
+        self.requests.append(parsed)
+        if self._responder is not None:
+            status, body = self._responder(parsed, len(self.requests) - 1)
+        else:
+            status, body = self._status, self._body
+        return httpx.Response(status, json=body)
+
+
+def _fixed_transport(status: int = 200, body: dict[str, Any] | None = None) -> _RecordingTransport:
+    resolved = body if body is not None else _openrouter_payload()
+    return _RecordingTransport(lambda parsed, attempt: (status, resolved))
+
+
+def test_openrouter_success_parses_cost_from_usage() -> None:
+    transport = _fixed_transport()
+    client = OpenRouterClient(api_key="k", transport=transport)
+
+    result = client.run(system="sys", prompt="hi", model="openai/gpt-4o-mini")
+
+    assert result.text == '{"probability": 0.4}'
+    assert result.input_tokens == 4590
+    assert result.output_tokens == 42
+    # Real-dollar cost comes straight from usage.cost (no price_for guess).
+    assert result.cost_usd == pytest.approx(0.0025)
+    assert result.stop_reason == "stop"
+    assert result.model == "openai/gpt-4o-mini"
+
+
+def test_openrouter_cost_falls_back_to_price_for_when_absent() -> None:
+    # usage without a "cost" field → fall back to the pricing table. The default
+    # config prices claude-sonnet-5 at $3/$15 per Mtok.
+    body = _openrouter_payload(usage={"prompt_tokens": 1_000_000, "completion_tokens": 1_000_000})
+    client = OpenRouterClient(api_key="k", transport=_fixed_transport(body=body))
+
+    result = client.run(system="s", prompt="p", model="claude-sonnet-5")
+
+    assert result.cost_usd == pytest.approx(3.0 + 15.0)
+
+
+def test_openrouter_request_body_has_max_tokens_usage_and_effort() -> None:
+    transport = _fixed_transport()
+    client = OpenRouterClient(api_key="k", transport=transport)
+
+    client.run(system="the system", prompt="the user", model="m", max_tokens=256, effort="high")
+
+    body = transport.requests[0]
+    assert body["model"] == "m"
+    assert body["messages"] == [
+        {"role": "system", "content": "the system"},
+        {"role": "user", "content": "the user"},
+    ]
+    assert body["max_tokens"] == 256  # honored here, unlike the CLIs
+    assert body["usage"] == {"include": True}
+    assert body["reasoning"] == {"effort": "high"}
+
+
+def test_openrouter_request_body_omits_max_tokens_and_effort_when_unset() -> None:
+    transport = _fixed_transport()
+    client = OpenRouterClient(api_key="k", transport=transport)
+
+    client.run(system="s", prompt="p", model="m")  # no max_tokens, no effort
+
+    body = transport.requests[0]
+    assert "max_tokens" not in body
+    assert "reasoning" not in body
+    assert "response_format" not in body
+
+
+def test_openrouter_sends_response_format_with_schema() -> None:
+    transport = _fixed_transport()
+    client = OpenRouterClient(api_key="k", transport=transport)
+    schema: dict[str, object] = {
+        "type": "object",
+        "properties": {"probability": {"type": "number"}},
+    }
+
+    client.run(system="s", prompt="p", model="m", json_schema=schema)
+
+    rf = transport.requests[0]["response_format"]
+    assert rf["type"] == "json_schema"
+    assert rf["json_schema"]["name"] == "result"
+    assert rf["json_schema"]["strict"] is True
+    # Schema is OpenAI-strict normalized: object nodes gain additionalProperties.
+    assert rf["json_schema"]["schema"] == {**schema, "additionalProperties": False}
+
+
+def test_openrouter_retries_once_without_schema_on_unsupported_400() -> None:
+    schema: dict[str, object] = {"type": "object", "properties": {}}
+
+    def responder(parsed: dict[str, Any], attempt: int) -> tuple[int, dict[str, Any]]:
+        if attempt == 0:
+            # First attempt (with response_format) is rejected as unsupported.
+            return 400, {"error": {"message": "This model does not support response_format."}}
+        return 200, _openrouter_payload()
+
+    transport = _RecordingTransport(responder)
+    client = OpenRouterClient(api_key="k", transport=transport)
+
+    result = client.run(system="s", prompt="p", model="m", json_schema=schema)
+
+    assert len(transport.requests) == 2
+    assert "response_format" in transport.requests[0]  # first tried the schema
+    assert "response_format" not in transport.requests[1]  # retry dropped it
+    assert result.text == '{"probability": 0.4}'
+
+
+def test_openrouter_empty_model_raises() -> None:
+    client = OpenRouterClient(api_key="k", transport=_fixed_transport())
+    with pytest.raises(LlmError, match="no default model"):
+        client.run(system="s", prompt="p", model="")
+
+
+def test_openrouter_missing_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with pytest.raises(LlmError, match="OPENROUTER_API_KEY"):
+        OpenRouterClient(api_key=None)
+
+
+def test_openrouter_non_2xx_raises_with_body_tail() -> None:
+    body = {"error": {"message": "insufficient credits"}}
+    client = OpenRouterClient(api_key="k", transport=_fixed_transport(status=402, body=body))
+
+    with pytest.raises(LlmError) as excinfo:
+        client.run(system="s", prompt="p", model="m")
+    assert "402" in str(excinfo.value)
+    assert excinfo.value.stderr is not None
+    assert "insufficient credits" in excinfo.value.stderr
+
+
+def test_build_llm_client_openrouter(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    cfg = TaskModelConfig(model="openai/gpt-4o-mini", max_tokens=100, provider="openrouter")
+    assert isinstance(build_llm_client(cfg), OpenRouterClient)
+
+
+def test_check_provider_cli_openrouter_env_based(monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = TaskModelConfig(model="m", max_tokens=100, provider="openrouter")
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    assert check_provider_cli(cfg) is True
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    assert check_provider_cli(cfg) is False

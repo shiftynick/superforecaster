@@ -102,12 +102,15 @@ def _build_client(token: str) -> MetaculusClient:
 
 
 def _require_llm_cli() -> None:
-    """Ensure the configured provider's CLI is installed, or exit with help.
+    """Ensure the configured provider is ready to use, or exit with help.
 
-    Provider-aware: it checks whichever binary the ``forecast_pass`` task's
-    provider needs (today that is the ``claude`` CLI). An unknown provider name
+    Provider-aware: for CLI providers this checks the binary is on PATH; for
+    OpenRouter it checks the API key is set (so ``.env`` is loaded first — the
+    readiness check itself only reads ``os.environ``). An unknown provider name
     in config surfaces here as a clear error rather than deep in a forecast.
     """
+    _load_dotenv(Path("engine/.env"))
+    _load_dotenv(Path(".env"))
     config = load_task_config("forecast_pass")
     try:
         available = check_provider_cli(config)
@@ -115,7 +118,14 @@ def _require_llm_cli() -> None:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
     if not available:
-        typer.echo(_CLAUDE_CLI_HELP, err=True)
+        if config.provider == "openrouter":
+            typer.echo(
+                "OPENROUTER_API_KEY is not set. The 'openrouter' provider needs it — "
+                "add OPENROUTER_API_KEY=<key> to engine/.env.",
+                err=True,
+            )
+        else:
+            typer.echo(_CLAUDE_CLI_HELP, err=True)
         raise typer.Exit(code=1)
 
 

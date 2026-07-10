@@ -29,7 +29,13 @@ sandbox = "bot-testing-area"         # unscored test tournament
 #   provider   : OPTIONAL. Which LLM backend runs the call. Defaults to
 #                "claude-cli" (the Claude Code CLI on the owner's subscription).
 #                Also supported: "codex-cli" (the Codex CLI on the owner's Codex
-#                subscription). More providers (OpenRouter) will be added later.
+#                subscription) and "openrouter" (a plain HTTPS API keyed by
+#                OPENROUTER_API_KEY in engine/.env — NOT a CLI). For openrouter,
+#                'model' is REQUIRED (it has no default model), 'max_tokens' is
+#                actually honored (the CLIs ignore it), and the logged cost is
+#                REAL dollars from usage.cost — not notional. The Metaculus-
+#                donated tournament credits arrive on an OpenRouter key, so that
+#                real cost is the true draw against them.
 
 [tasks.forecast_pass]
 provider = "claude-cli"
@@ -57,6 +63,22 @@ max_tokens = 1024
 # [tasks.forecast_pass]
 # provider = "codex-cli"
 # model = "gpt-5.5"
+# effort = "low"
+# max_tokens = 4096
+
+# Alternative: run the same task through OpenRouter (a plain HTTPS API, not a
+# CLI). Swap the active [tasks.forecast_pass] table for this one. Requires
+# OPENROUTER_API_KEY in engine/.env. Unlike the CLIs: 'model' is required (there
+# is NO default model — OpenRouter routes by explicit id), 'max_tokens' is
+# honored, effort maps to OpenRouter's reasoning param, and json_schema maps to
+# structured-output response_format (models that don't support it fall back to
+# prompt-JSON automatically). The logged cost is REAL dollars (usage.cost from
+# the API), and it draws down the Metaculus-donated tournament credits, which
+# arrive on an OpenRouter key. No [pricing.*] entry is needed — OpenRouter
+# reports the actual cost, so price_for is only a fallback.
+# [tasks.forecast_pass]
+# provider = "openrouter"
+# model = "openai/gpt-5.5"
 # effort = "low"
 # max_tokens = 4096
 

@@ -5,15 +5,20 @@ API key. This module replaces that with a subprocess wrapper around the **Claude
 Code CLI** (``claude -p ... --output-format json``), so forecast passes draw on
 the owner's Claude subscription instead. See ``docs/adr/0002-llm-via-claude-cli``.
 
-The design is deliberately provider-neutral so a second provider (a Codex CLI,
-OpenRouter, ...) can be added later as a purely additive change:
+The design is deliberately provider-neutral, so providers of different shapes
+coexist behind one interface: two are local CLIs (:class:`ClaudeCliClient`,
+:class:`CodexCliClient`, subprocess-billed to the owner's subscriptions) and one
+is a plain HTTPS API (:class:`OpenRouterClient`, using ``httpx`` with an
+injectable transport like the search/metaculus clients — no CLI involved).
 
 - :class:`LlmResult` and :class:`LlmError` carry no provider-specific detail.
 - :class:`LlmClient` is the structural type every client satisfies: a single
   ``run(system, prompt, model, max_tokens, json_schema)`` method returning an
   :class:`LlmResult`. ``json_schema`` is optional *capability*, not contract:
-  providers that support schema-constrained output (Codex CLI) use it; the
-  Claude CLI ignores it and relies on prompt-JSON + validation retry upstream.
+  providers that support schema-constrained output (Codex CLI, OpenRouter) use
+  it; the Claude CLI ignores it and relies on prompt-JSON + validation retry
+  upstream. ``max_tokens`` is likewise capability: honored by OpenRouter, a
+  documented no-op for both CLIs.
 - :func:`build_llm_client` is the one factory the rest of the engine calls; it
   dispatches on the task's ``provider`` field and is the only place that knows
   which concrete client class a provider name maps to.
@@ -37,7 +42,9 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
+
+import httpx
 
 from .config import TaskModelConfig, price_for
 
@@ -45,12 +52,23 @@ from .config import TaskModelConfig, price_for
 # subscription. We remove it from the child process's environment.
 _API_KEY_ENV = "ANTHROPIC_API_KEY"
 
-# Provider name -> the CLI binary it shells out to. Adding a provider is a new
-# entry here plus a branch in build_llm_client; nothing else needs to change.
+# Provider name -> the CLI binary it shells out to. Adding a *CLI* provider is a
+# new entry here plus a branch in build_llm_client. OpenRouter is not a CLI (it
+# is a plain HTTPS API), so it is deliberately absent from this map and handled
+# as its own branch throughout.
 _PROVIDER_BINARIES: dict[str, str] = {"claude-cli": "claude", "codex-cli": "codex"}
 
+# The HTTP (non-CLI) provider name.
+OPENROUTER_PROVIDER = "openrouter"
+
+# Env var holding the OpenRouter key (loaded from engine/.env by the CLI layer).
+OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY"
+
+# OpenRouter's OpenAI-compatible chat-completions endpoint.
+_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
 # Human-facing tuple of what we support, for error messages.
-SUPPORTED_PROVIDERS: tuple[str, ...] = tuple(sorted(_PROVIDER_BINARIES))
+SUPPORTED_PROVIDERS: tuple[str, ...] = tuple(sorted([*_PROVIDER_BINARIES, OPENROUTER_PROVIDER]))
 
 
 @dataclass(frozen=True)
@@ -530,12 +548,268 @@ def _strictify_schema(schema: dict[str, object]) -> dict[str, object]:
     return result
 
 
+def _http_body_tail(text: str, max_chars: int = 500) -> str | None:
+    """Return a compact tail of an HTTP error body for diagnostics, or ``None``."""
+    stripped = text.strip()
+    if not stripped:
+        return None
+    if len(stripped) <= max_chars:
+        return stripped
+    return "..." + stripped[-max_chars:]
+
+
+# Substrings in an OpenRouter 4xx error body that mean "this model does not
+# support server-side structured output" — the signal to retry without a schema.
+_SCHEMA_UNSUPPORTED_MARKERS: tuple[str, ...] = (
+    "response_format",
+    "json_schema",
+    "structured output",
+    "structured outputs",
+    "schema",
+)
+
+
+def _is_schema_unsupported(body_text: str) -> bool:
+    """Heuristic: does a 4xx body say response_format/structured output is unsupported?"""
+    lowered = body_text.lower()
+    return any(marker in lowered for marker in _SCHEMA_UNSUPPORTED_MARKERS)
+
+
+class OpenRouterClient:
+    """Call a model through OpenRouter's OpenAI-compatible chat-completions API.
+
+    Unlike :class:`ClaudeCliClient` and :class:`CodexCliClient`, this provider is
+    **not** a local CLI: it is a plain HTTPS endpoint. So this client uses
+    ``httpx`` directly with an injectable transport (the same ``MockTransport``
+    test seam :mod:`superforecaster.search` and :mod:`superforecaster.metaculus`
+    use), not a subprocess ``runner``. Each :meth:`run` POSTs one request to
+    ``/chat/completions`` and parses the single JSON reply.
+
+    Behaviours that set this client apart from the CLI ones:
+
+    - **``max_tokens`` is honored.** This is the first provider that actually
+      caps output length — it is sent as the request's ``max_tokens`` field.
+      (The two CLIs have no output-cap flag and document it as a no-op.)
+    - **No default model.** OpenRouter routes by explicit model id and has no
+      "use my default" notion, so an empty ``model`` is an error here — the
+      opposite of the CLIs, where ``""`` means "the CLI's own default model".
+    - **Real-dollar cost.** OpenRouter always returns ``usage.cost`` (real
+      account charge in USD), so ``cost_usd`` comes straight from the API with no
+      ``price_for`` guess needed; the pricing table is only a fallback for the
+      rare response that omits it. Tournament credits donated by Metaculus land
+      on the OpenRouter key, so this cost is the true draw against them.
+    - **``effort`` maps to OpenRouter's ``reasoning`` param** (``{"effort": ...}``),
+      omitted entirely when ``None``.
+    - **``json_schema`` maps to ``response_format`` structured output**, but not
+      every model supports it. On a 4xx whose body names response_format /
+      structured output as the problem, we retry the call **once** without the
+      schema (callers still have prompt-JSON + validation retry upstream as the
+      final backstop) before surfacing an :class:`LlmError`.
+    """
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        *,
+        transport: httpx.BaseTransport | None = None,
+        timeout_s: float = 300.0,
+    ) -> None:
+        """Configure the client.
+
+        Args:
+            api_key: The OpenRouter key. When ``None``, read from
+                ``OPENROUTER_API_KEY`` in the environment (loading ``engine/.env``
+                is the CLI layer's job — this only reads ``os.environ``). A
+                constructor arg overrides the env, mirroring the search clients.
+            transport: Optional ``httpx`` transport (tests inject a
+                ``MockTransport`` so no real network is touched).
+            timeout_s: Per-request HTTP timeout, matching the CLI clients' cap.
+
+        Raises:
+            LlmError: No key was passed and none is set in the environment.
+        """
+        key = api_key if api_key is not None else os.environ.get(OPENROUTER_API_KEY_ENV)
+        if not key:
+            raise LlmError(
+                f"Missing {OPENROUTER_API_KEY_ENV} in the environment; "
+                f"set it in engine/.env to use the OpenRouter provider."
+            )
+        self._client = httpx.Client(
+            base_url=_OPENROUTER_BASE_URL,
+            transport=transport,
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            timeout=timeout_s,
+        )
+
+    def __enter__(self) -> OpenRouterClient:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Close the underlying HTTP connection pool."""
+        self._client.close()
+
+    def run(
+        self,
+        system: str,
+        prompt: str,
+        model: str,
+        max_tokens: int | None = None,
+        json_schema: dict[str, object] | None = None,
+        effort: str | None = None,
+    ) -> LlmResult:
+        """Prompt the model once via OpenRouter and return the parsed result.
+
+        Args:
+            system: The system prompt (sent as a ``role: "system"`` message).
+            prompt: The user prompt (sent as a ``role: "user"`` message).
+            model: OpenRouter model id (e.g. ``"openai/gpt-4o-mini"``). Required —
+                OpenRouter has no default model, so an empty string is an error.
+            max_tokens: Honored here (unlike the CLIs) — sent as ``max_tokens``.
+                ``None`` leaves output length uncapped.
+            json_schema: If given, sent as a ``response_format`` json_schema
+                (strict) so the model returns schema-constrained JSON. Not every
+                model supports this; an unsupported-schema 4xx triggers one retry
+                without the schema before failing.
+            effort: Optional reasoning-effort level, mapped to OpenRouter's
+                ``reasoning: {"effort": <value>}``. ``None`` omits it.
+
+        Returns:
+            An :class:`LlmResult` with the text, token counts, and real cost.
+
+        Raises:
+            LlmError: Empty model, the HTTP call failed, a non-2xx response, or a
+                malformed body.
+        """
+        if not model:
+            raise LlmError(
+                "OpenRouter requires an explicit model id (it has no default "
+                "model); set 'model' in the task config."
+            )
+
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ]
+        body: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            # Usage accounting: usage.cost is always returned now, so this flag is
+            # a documented no-op, but it is harmless and states intent explicitly.
+            "usage": {"include": True},
+        }
+        if max_tokens is not None:
+            body["max_tokens"] = max_tokens
+        if effort:
+            body["reasoning"] = {"effort": effort}
+        if json_schema is not None:
+            body["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "result",
+                    "strict": True,
+                    "schema": _strictify_schema(json_schema),
+                },
+            }
+
+        response = self._post(body)
+
+        # One cheap resilience step: if the model rejected the schema, drop it and
+        # try once more. Upstream prompt-JSON + validation retry is the backstop.
+        if (
+            json_schema is not None
+            and 400 <= response.status_code < 500
+            and _is_schema_unsupported(response.text)
+        ):
+            body.pop("response_format", None)
+            response = self._post(body)
+
+        if response.status_code >= 300:
+            raise LlmError(
+                f"OpenRouter returned HTTP {response.status_code}.",
+                stderr=_http_body_tail(response.text),
+            )
+
+        try:
+            payload = response.json()
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise LlmError(
+                "OpenRouter returned a body that was not valid JSON.",
+                stderr=_http_body_tail(response.text),
+            ) from exc
+        if not isinstance(payload, dict):
+            raise LlmError(
+                "OpenRouter returned JSON that was not a result object.",
+                stderr=_http_body_tail(response.text),
+            )
+
+        return _result_from_openrouter(payload, model)
+
+    def _post(self, body: dict[str, Any]) -> httpx.Response:
+        """POST one request body to ``/chat/completions``, mapping transport errors."""
+        try:
+            return self._client.post("/chat/completions", json=body)
+        except httpx.HTTPError as exc:
+            raise LlmError(f"OpenRouter request failed: {exc}") from exc
+
+
+def _result_from_openrouter(payload: dict[str, Any], model: str) -> LlmResult:
+    """Turn an OpenRouter chat-completions reply into an :class:`LlmResult`.
+
+    Text comes from ``choices[0].message.content``; token counts from
+    ``usage.prompt_tokens``/``completion_tokens``; ``stop_reason`` from
+    ``choices[0].finish_reason``. Cost is the real-dollar ``usage.cost`` when the
+    API reports it, else the priced-token fallback from ``config.price_for``.
+    """
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise LlmError("OpenRouter response had no choices.", envelope=payload)
+    choice = choices[0]
+
+    message = choice.get("message")
+    text = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(text, str):
+        raise LlmError("OpenRouter choice had no message content text.", envelope=payload)
+
+    stop_raw = choice.get("finish_reason")
+    stop_reason = stop_raw if isinstance(stop_raw, str) else None
+
+    usage = payload.get("usage")
+    input_tokens = 0
+    output_tokens = 0
+    cost_usd: float | None = None
+    if isinstance(usage, dict):
+        input_tokens = _as_int(usage.get("prompt_tokens"))
+        output_tokens = _as_int(usage.get("completion_tokens"))
+        cost_raw = usage.get("cost")
+        if isinstance(cost_raw, int | float) and not isinstance(cost_raw, bool):
+            cost_usd = float(cost_raw)
+
+    # Real-dollar cost from the API needs no guess; only fall back to the pricing
+    # table when the API omitted cost (rare).
+    if cost_usd is None:
+        cost_usd = price_for(model, input_tokens, output_tokens)
+
+    return LlmResult(
+        text=text,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost_usd=cost_usd,
+        stop_reason=stop_reason,
+        model=model,
+    )
+
+
 def build_llm_client(config: TaskModelConfig) -> LlmClient:
     """Return the client for a task's configured provider.
 
     This is the single dispatch point on ``provider``. Supported today:
-    ``claude-cli`` and ``codex-cli``; a future OpenRouter client is a new branch
-    here.
+    ``claude-cli``, ``codex-cli`` (local CLIs), and ``openrouter`` (HTTPS API).
 
     Raises:
         LlmError: If the provider name is not one we support.
@@ -544,6 +818,8 @@ def build_llm_client(config: TaskModelConfig) -> LlmClient:
         return ClaudeCliClient()
     if config.provider == "codex-cli":
         return CodexCliClient()
+    if config.provider == OPENROUTER_PROVIDER:
+        return OpenRouterClient()
     raise LlmError(
         f"Unknown LLM provider {config.provider!r}; "
         f"supported providers: {', '.join(SUPPORTED_PROVIDERS)}."
@@ -561,7 +837,12 @@ def check_codex_cli(codex_path: str = "codex") -> bool:
 
 
 def check_provider_cli(config: TaskModelConfig) -> bool:
-    """Return whether the CLI binary the task's provider needs is on ``PATH``.
+    """Return whether the task's provider is ready to use on this machine.
+
+    For the CLI providers this means "is the CLI binary on ``PATH``". OpenRouter
+    is not a CLI — it has no binary to find — so "ready" instead means "is
+    ``OPENROUTER_API_KEY`` set in the environment" (loading ``engine/.env`` is the
+    CLI layer's job; this only inspects ``os.environ``).
 
     Raises:
         LlmError: If the provider name is not one we support.
@@ -572,6 +853,9 @@ def check_provider_cli(config: TaskModelConfig) -> bool:
     if config.provider == "codex-cli":
         # Delegate so tests can monkeypatch a single seam, ``check_codex_cli``.
         return check_codex_cli(_PROVIDER_BINARIES["codex-cli"])
+    if config.provider == OPENROUTER_PROVIDER:
+        # No CLI to locate: readiness is "the API key is present".
+        return bool(os.environ.get(OPENROUTER_API_KEY_ENV))
     if config.provider not in _PROVIDER_BINARIES:
         raise LlmError(
             f"Unknown LLM provider {config.provider!r}; "
