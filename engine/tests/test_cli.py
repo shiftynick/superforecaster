@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 
 from superforecaster import cli
 from superforecaster.extract import TIER_HTTPX_TRAFILATURA, ExtractedDoc
-from superforecaster.llm import LlmResult
+from superforecaster.llm import LlmError, LlmResult
 from superforecaster.metaculus import MetaculusClient
 from superforecaster.research import ResearchBundle
 from superforecaster.search import SearchResult
@@ -562,6 +562,245 @@ def test_forecast_no_matching_questions(monkeypatch: pytest.MonkeyPatch, tmp_pat
     result = runner.invoke(cli.app, ["forecast", "--data-dir", str(tmp_path / "empty")])
     assert result.exit_code == 0, result.output
     assert "no matching open questions" in result.output
+
+
+class _FakeMemberLlm:
+    """Ensemble-member fake: returns a fixed probability, or raises to fail."""
+
+    def __init__(self, probability: float | None = None, *, fail: bool = False) -> None:
+        self._probability = probability
+        self._fail = fail
+
+    def run(
+        self,
+        system: str,
+        prompt: str,
+        model: str,
+        max_tokens: int | None = None,
+        json_schema: dict[str, object] | None = None,
+        effort: str | None = None,
+    ) -> LlmResult:
+        if self._fail:
+            raise LlmError("member boom")
+        assert self._probability is not None
+        return LlmResult(
+            text=(
+                "Reasoning.\n```json\n"
+                f'{{"probability": {self._probability}, "confidence": "medium", '
+                '"rationale": "r", "reference_class": "c"}\n```'
+            ),
+            input_tokens=100,
+            output_tokens=50,
+            cost_usd=0.01,
+            stop_reason="end_turn",
+            model=model,
+        )
+
+
+def _member_factory(*fakes: _FakeMemberLlm) -> Any:
+    """A client_factory that hands out the given member fakes in order."""
+    it = iter(fakes)
+
+    def factory(config: Any) -> _FakeMemberLlm:
+        return next(it)
+
+    return factory
+
+
+_THREE_CLAUDE_MEMBERS = (
+    '[[ensemble.members]]\nframe = "outside-first"\nprovider = "claude-cli"\n'
+    'model = "m0"\nmax_tokens = 100\n\n'
+    '[[ensemble.members]]\nframe = "inside-first"\nprovider = "claude-cli"\n'
+    'model = "m1"\nmax_tokens = 100\n\n'
+    '[[ensemble.members]]\nframe = "status-quo"\nprovider = "claude-cli"\n'
+    'model = "m2"\nmax_tokens = 100\n'
+)
+
+
+def _pin_ensemble_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, members_toml: str
+) -> None:
+    """Pin SUPERFORECASTER_CONFIG to an [ensemble] roster so tests don't depend on
+    the real settings.toml (which the owner may retune at will)."""
+    config = tmp_path / "settings.toml"
+    config.write_text(f"[ensemble]\n{members_toml}", encoding="utf-8")
+    monkeypatch.setenv("SUPERFORECASTER_CONFIG", str(config))
+
+
+def test_forecast_ensemble_happy_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    snap_dir = tmp_path / "snapshots"
+    fc_dir = tmp_path / "forecasts"
+    _pin_ensemble_config(monkeypatch, tmp_path, _THREE_CLAUDE_MEMBERS)
+    _seed_open_question(monkeypatch, snap_dir)
+
+    monkeypatch.setattr(
+        cli,
+        "_build_member_client_factory",
+        lambda: _member_factory(_FakeMemberLlm(0.4), _FakeMemberLlm(0.5), _FakeMemberLlm(0.6)),
+    )
+    _pass_cli_check(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "forecast",
+            "--ensemble",
+            "--no-research",
+            "--data-dir",
+            str(snap_dir),
+            "--forecast-dir",
+            str(fc_dir),
+            "--closing-within-days",
+            "365",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    # Log-odds of 0.4/0.5/0.6 average to 0 -> pooled 0.5 (fixed coeff 1.0).
+    assert "p=0.50" in result.output
+    assert "members=3ok/0failed" in result.output
+    assert "ensemble" in result.output
+    assert "n=1" in result.output
+
+    from superforecaster.forecast_store import ForecastStore
+
+    stored = list(ForecastStore(fc_dir).iter_all())
+    members = [r for r in stored if r.method == "ensemble-b-member"]
+    pooled = [r for r in stored if r.method == "ensemble-b"]
+    assert len(members) == 3
+    assert len(pooled) == 1
+    assert {m.frame for m in members} == {"outside-first", "inside-first", "status-quo"}
+    (p,) = pooled
+    assert p.model == "ensemble-b"
+    assert p.probability == pytest.approx(0.5)
+    assert p.ensemble is not None
+    assert p.ensemble.member_probabilities == [0.4, 0.5, 0.6]
+    # Pooled cost sums the three members ($0.01 each); members are stored too.
+    assert p.cost_usd == pytest.approx(0.03)
+
+
+def test_forecast_ensemble_tolerates_member_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    snap_dir = tmp_path / "snapshots"
+    fc_dir = tmp_path / "forecasts"
+    _pin_ensemble_config(monkeypatch, tmp_path, _THREE_CLAUDE_MEMBERS)
+    _seed_open_question(monkeypatch, snap_dir)
+
+    # Middle member fails; the pool forms from the two survivors.
+    monkeypatch.setattr(
+        cli,
+        "_build_member_client_factory",
+        lambda: _member_factory(
+            _FakeMemberLlm(0.4), _FakeMemberLlm(fail=True), _FakeMemberLlm(0.6)
+        ),
+    )
+    _pass_cli_check(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "forecast",
+            "--ensemble",
+            "--no-research",
+            "--data-dir",
+            str(snap_dir),
+            "--forecast-dir",
+            str(fc_dir),
+            "--closing-within-days",
+            "365",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "members=2ok/1failed" in result.output
+    assert "n=1" in result.output
+
+    from superforecaster.forecast_store import ForecastStore
+
+    stored = list(ForecastStore(fc_dir).iter_all())
+    members = [r for r in stored if r.method == "ensemble-b-member"]
+    (pooled,) = [r for r in stored if r.method == "ensemble-b"]
+    assert len(members) == 2
+    assert pooled.ensemble is not None
+    assert pooled.ensemble.member_probabilities == [0.4, 0.6]
+    assert len(pooled.ensemble.member_failures) == 1
+
+
+def test_forecast_ensemble_hard_failure_is_isolated(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Two open questions with distinct close times for a stable order.
+    post_a = fixtures.open_binary_post(101, 201)
+    post_a["question"]["scheduled_close_time"] = "2026-08-01T00:00:00Z"
+    post_b = fixtures.open_binary_post(102, 202)
+    post_b["question"]["scheduled_close_time"] = "2026-08-02T00:00:00Z"
+    snap_dir = tmp_path / "snapshots"
+    fc_dir = tmp_path / "forecasts"
+    _pin_ensemble_config(monkeypatch, tmp_path, _THREE_CLAUDE_MEMBERS)
+    _install_fake(monkeypatch, [post_a, post_b])
+    runner.invoke(cli.app, ["scrape", "--data-dir", str(snap_dir)])
+
+    # Q1: two of three members fail -> only one survivor -> ensemble raises.
+    # Q2: all three succeed. One factory serves both questions, in order.
+    monkeypatch.setattr(
+        cli,
+        "_build_member_client_factory",
+        lambda: _member_factory(
+            _FakeMemberLlm(0.5),
+            _FakeMemberLlm(fail=True),
+            _FakeMemberLlm(fail=True),
+            _FakeMemberLlm(0.4),
+            _FakeMemberLlm(0.5),
+            _FakeMemberLlm(0.6),
+        ),
+    )
+    _pass_cli_check(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "forecast",
+            "--ensemble",
+            "--no-research",
+            "--data-dir",
+            str(snap_dir),
+            "--forecast-dir",
+            str(fc_dir),
+            "--closing-within-days",
+            "365",
+        ],
+    )
+    assert result.exit_code == 1  # a question's ensemble failed
+    assert "failed=1" in result.output
+    assert "n=1" in result.output
+
+    from superforecaster.forecast_store import ForecastStore
+
+    stored = list(ForecastStore(fc_dir).iter_all())
+    # Q1 stored nothing; Q2 stored its 3 members + 1 pooled, all for question 202.
+    assert {r.question_id for r in stored} == {202}
+    assert len([r for r in stored if r.method == "ensemble-b-member"]) == 3
+    assert len([r for r in stored if r.method == "ensemble-b"]) == 1
+
+
+def test_forecast_ensemble_checks_each_distinct_provider(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Roster spans claude-cli (available) and openrouter (key missing): the
+    # readiness check must catch the openrouter member and exit with its help.
+    members = (
+        '[[ensemble.members]]\nframe = "outside-first"\nprovider = "claude-cli"\n'
+        'model = "m0"\nmax_tokens = 100\n\n'
+        '[[ensemble.members]]\nframe = "inside-first"\nprovider = "openrouter"\n'
+        'model = "m1"\nmax_tokens = 100\n'
+    )
+    _pin_ensemble_config(monkeypatch, tmp_path, members)
+    monkeypatch.setattr("superforecaster.llm.check_claude_cli", lambda path="claude": True)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)  # avoid picking up a stray .env
+
+    result = runner.invoke(cli.app, ["forecast", "--ensemble", "--data-dir", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "OPENROUTER_API_KEY" in result.output
 
 
 def test_data_dir_comes_from_settings_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

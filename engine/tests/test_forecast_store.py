@@ -7,7 +7,7 @@ from pathlib import Path
 
 from superforecaster.extract import TIER_HTTPX_TRAFILATURA, ExtractedDoc
 from superforecaster.forecast_store import ForecastStore
-from superforecaster.forecaster import ForecastRecord
+from superforecaster.forecaster import EnsembleDetail, ForecastRecord
 from superforecaster.research import ResearchBundle
 from superforecaster.search import SearchResult
 
@@ -124,6 +124,68 @@ def test_record_with_research_bundle_roundtrips(tmp_path: Path) -> None:
     assert loaded.research.docs[0].tier == TIER_HTTPX_TRAFILATURA
     assert loaded.research.tier_stats == {TIER_HTTPX_TRAFILATURA: 1}
     assert loaded.research.news_quota_exhausted is True
+
+
+def test_defaults_for_new_method_fields(tmp_path: Path) -> None:
+    """A plain record round-trips with the ensemble fields at their defaults."""
+    store = ForecastStore(tmp_path)
+    store.append([_record(1)])
+    (loaded,) = list(store.iter_all())
+    assert loaded.method == "checklist-a"
+    assert loaded.frame is None
+    assert loaded.ensemble is None
+
+
+def test_ensemble_fields_roundtrip(tmp_path: Path) -> None:
+    """A pooled record's method/frame/ensemble detail survive a store round-trip."""
+    detail = EnsembleDetail(
+        member_frames=["outside-first", "inside-first"],
+        member_models=["m0", "m1"],
+        member_probabilities=[0.4, 0.6],
+        spread=0.81,
+        coefficient_applied=1.2,
+        extremization_mode="agreement",
+        member_failures=["status-quo/m2: boom"],
+    )
+    member = _record(1).model_copy(update={"method": "ensemble-b-member", "frame": "outside-first"})
+    pooled = _record(1).model_copy(
+        update={"method": "ensemble-b", "model": "ensemble-b", "ensemble": detail}
+    )
+
+    store = ForecastStore(tmp_path)
+    store.append([member, pooled])
+    loaded = list(store.iter_all())
+
+    member_out = next(r for r in loaded if r.method == "ensemble-b-member")
+    pooled_out = next(r for r in loaded if r.method == "ensemble-b")
+    assert member_out.frame == "outside-first"
+    assert member_out.ensemble is None
+    assert pooled_out.frame is None
+    assert pooled_out.ensemble is not None
+    assert pooled_out.ensemble.member_frames == ["outside-first", "inside-first"]
+    assert pooled_out.ensemble.member_probabilities == [0.4, 0.6]
+    assert pooled_out.ensemble.extremization_mode == "agreement"
+    assert pooled_out.ensemble.member_failures == ["status-quo/m2: boom"]
+
+
+def test_old_jsonl_line_without_new_fields_parses(tmp_path: Path) -> None:
+    """A pre-ensemble JSONL line (no method/frame/ensemble keys) still loads."""
+    # A minimal record as written before the ensemble fields existed.
+    line = (
+        '{"created_at": "2026-07-09T12:00:00+00:00", "question_id": 7, '
+        '"post_id": 107, "title": "Legacy", "probability": 0.5, '
+        '"raw_probability": 0.5, "confidence": "medium", "rationale": "r", '
+        '"reference_class": "c", "model": "claude-sonnet-5", "input_tokens": 10, '
+        '"output_tokens": 5, "cost_usd": 0.01, "dry_run": true}'
+    )
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "2026-07-09.jsonl").write_text(line + "\n", encoding="utf-8")
+
+    (loaded,) = list(ForecastStore(tmp_path).iter_all())
+    assert loaded.question_id == 7
+    assert loaded.method == "checklist-a"  # default fills in
+    assert loaded.frame is None
+    assert loaded.ensemble is None
 
 
 def test_empty_store(tmp_path: Path) -> None:

@@ -15,14 +15,24 @@ The Metaculus API token comes from the ``METACULUS_TOKEN`` environment variable
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
 import typer
 
-from .config import RetrievalSettings, load_retrieval_settings, load_settings, load_task_config
+from .config import (
+    EnsembleSettings,
+    RetrievalSettings,
+    TaskModelConfig,
+    load_ensemble_settings,
+    load_retrieval_settings,
+    load_settings,
+    load_task_config,
+)
 from .dotenv import load_dotenv as _load_dotenv
+from .ensemble import EnsembleResult, pooled_forecast_record, run_ensemble
 from .extract import Extractor, build_extractor
 from .forecast_store import ForecastStore
 from .forecaster import ForecastRecord, run_forecast_pass
@@ -67,6 +77,15 @@ _CLAUDE_CLI_HELP = (
     "Install Claude Code (https://claude.com/claude-code) and log in with "
     "'claude login', then re-run. Verify with:  claude --version"
 )
+_CODEX_CLI_HELP = (
+    "The Codex CLI ('codex') was not found on your PATH. Some passes run through "
+    "it on the owner's Codex subscription. Install the Codex CLI and log in with "
+    "your Codex subscription, then re-run. Verify with:  codex --version"
+)
+_OPENROUTER_KEY_HELP = (
+    "OPENROUTER_API_KEY is not set. The 'openrouter' provider needs it — "
+    "add OPENROUTER_API_KEY=<key> to engine/.env."
+)
 
 
 def _resolve_data_dir(data_dir: Path | None) -> Path:
@@ -101,32 +120,44 @@ def _build_client(token: str) -> MetaculusClient:
     return MetaculusClient(token=token)
 
 
-def _require_llm_cli() -> None:
-    """Ensure the configured provider is ready to use, or exit with help.
+def _provider_unavailable_help(provider: str) -> str:
+    """The setup-help message for a provider that is configured but not ready."""
+    if provider == "openrouter":
+        return _OPENROUTER_KEY_HELP
+    if provider == "codex-cli":
+        return _CODEX_CLI_HELP
+    return _CLAUDE_CLI_HELP
+
+
+def _require_llm_cli(configs: list[TaskModelConfig] | None = None) -> None:
+    """Ensure every configured provider is ready to use, or exit with help.
 
     Provider-aware: for CLI providers this checks the binary is on PATH; for
     OpenRouter it checks the API key is set (so ``.env`` is loaded first — the
     readiness check itself only reads ``os.environ``). An unknown provider name
     in config surfaces here as a clear error rather than deep in a forecast.
+
+    ``configs`` defaults to the single ``forecast_pass`` task (the baseline pass).
+    Ensemble mode passes the members' configs so each DISTINCT provider among them
+    is checked — the roster can span claude-cli, codex-cli, and openrouter, and
+    any one being unavailable exits with that provider's help.
     """
     _load_dotenv(Path("engine/.env"))
     _load_dotenv(Path(".env"))
-    config = load_task_config("forecast_pass")
-    try:
-        available = check_provider_cli(config)
-    except LlmError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
-    if not available:
-        if config.provider == "openrouter":
-            typer.echo(
-                "OPENROUTER_API_KEY is not set. The 'openrouter' provider needs it — "
-                "add OPENROUTER_API_KEY=<key> to engine/.env.",
-                err=True,
-            )
-        else:
-            typer.echo(_CLAUDE_CLI_HELP, err=True)
-        raise typer.Exit(code=1)
+    checks = configs if configs is not None else [load_task_config("forecast_pass")]
+    seen: set[str] = set()
+    for config in checks:
+        if config.provider in seen:
+            continue
+        seen.add(config.provider)
+        try:
+            available = check_provider_cli(config)
+        except LlmError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+        if not available:
+            typer.echo(_provider_unavailable_help(config.provider), err=True)
+            raise typer.Exit(code=1)
 
 
 # Seam for tests: monkeypatched to inject a fake LLM client.
@@ -137,6 +168,17 @@ def _build_llm_client() -> LlmClient | None:
     exactly as ``_build_client`` does for the Metaculus side.
     """
     return None
+
+
+# Seam for tests: monkeypatched to inject a fake ensemble member factory.
+def _build_member_client_factory() -> Callable[[TaskModelConfig], LlmClient]:
+    """Return the factory the ensemble uses to build each member's LLM client.
+
+    Defaults to :func:`build_llm_client` (dispatches on the member's provider).
+    Tests monkeypatch this to inject a fake factory that hands out canned clients
+    per member, mirroring :func:`_build_llm_client` for the single pass.
+    """
+    return build_llm_client
 
 
 # Seam for tests: monkeypatched to inject fake search clients.
@@ -355,6 +397,15 @@ def forecast(
         "--no-research",
         help="Skip retrieval and forecast blind (the baseline control arm).",
     ),
+    ensemble: bool = typer.Option(
+        False,
+        "--ensemble",
+        help=(
+            "Run the diverse ensemble (candidate B): N frames/models pooled over "
+            "one shared research bundle, instead of a single pass. Composes with "
+            "--no-research."
+        ),
+    ),
     data_dir: Path | None = _DataDirOption,
     forecast_dir: Path | None = _ForecastDirOption,
     post_id: list[int] = _PostIdOption,
@@ -364,10 +415,16 @@ def forecast(
     Each question is researched (query generation -> news + general search ->
     content extraction) into a frozen bundle that is rendered into the prompt and
     stored with the forecast. ``--no-research`` forecasts blind, preserving the
-    baseline for side-by-side comparison. All forecasts are dry runs — nothing is
-    submitted. Per-question LLM cost and search-credit draw are both logged.
+    baseline for side-by-side comparison. ``--ensemble`` swaps the single pass for
+    the diverse ensemble, storing every member record plus the pooled result. All
+    forecasts are dry runs — nothing is submitted. Per-question LLM cost and
+    search-credit draw are both logged.
     """
-    _require_llm_cli()
+    ensemble_settings = load_ensemble_settings() if ensemble else None
+    if ensemble_settings is not None:
+        _require_llm_cli([m.task_config() for m in ensemble_settings.members])
+    else:
+        _require_llm_cli()
     snap_dir = _resolve_data_dir(data_dir)
     snap_store = SnapshotStore(snap_dir)
     fc_store = ForecastStore(_resolve_forecast_dir(forecast_dir))
@@ -384,8 +441,11 @@ def forecast(
         typer.echo("forecast: no matching open questions to forecast.")
         return
 
-    config = load_task_config("forecast_pass")
-    client = _build_llm_client()
+    # The single pass needs the forecast-pass config + one client; the ensemble
+    # drives members from its own roster via the member factory instead.
+    config = None if ensemble else load_task_config("forecast_pass")
+    client = None if ensemble else _build_llm_client()
+    member_factory = _build_member_client_factory() if ensemble else None
 
     # Research context. Built once and reused across questions; the quota counter
     # lives in the data root (the parent of the snapshot dir), config-derived so
@@ -397,7 +457,13 @@ def forecast(
     # run can reuse a fresh bundle instead of re-researching.
     cache = None if no_research else ResearchCache(snap_dir.parent / "research")
 
-    records: list[ForecastRecord] = []
+    # ``to_store`` holds every record persisted (ensemble members AND pooled);
+    # ``summaries`` holds one record per question (the single pass, or the pooled
+    # ensemble record) so cost/credit totals are counted exactly once — a pooled
+    # record's cost/credits already sum its members, so summing members again
+    # would double-count.
+    to_store: list[ForecastRecord] = []
+    summaries: list[ForecastRecord] = []
     failures: list[str] = []
     try:
         for snapshot in questions:
@@ -407,6 +473,22 @@ def forecast(
                 bundle, research_state = _research_for_question(
                     snapshot, research_ctx, cache, now=now
                 )
+
+            if ensemble_settings is not None:
+                assert member_factory is not None  # set whenever ensemble is on
+                pooled = _forecast_ensemble_question(
+                    snapshot,
+                    ensemble_settings,
+                    member_factory,
+                    bundle,
+                    research_state,
+                    now=now,
+                    to_store=to_store,
+                    failures=failures,
+                )
+                if pooled is not None:
+                    summaries.append(pooled)
+                continue
 
             try:
                 record = run_forecast_pass(snapshot, client=client, config=config, research=bundle)
@@ -422,22 +504,77 @@ def forecast(
                 # run drew none. Zero the record's draw so summaries and quota
                 # accounting never double-count a reused bundle.
                 record = record.model_copy(update={"research_search_credits": 0})
-            records.append(record)
+            to_store.append(record)
+            summaries.append(record)
             _echo_forecast_summary(record, research_state)
     finally:
         if research_ctx is not None:
             research_ctx.close()
 
-    fc_store.append(records)
-    total_cost = sum(r.cost_usd for r in records if r.cost_usd is not None)
-    total_credits = sum(r.research_search_credits for r in records)
-    mode = "blind" if no_research else "researched"
+    fc_store.append(to_store)
+    total_cost = sum(r.cost_usd for r in summaries if r.cost_usd is not None)
+    total_credits = sum(r.research_search_credits for r in summaries)
+    mode = "ensemble" if ensemble else ("blind" if no_research else "researched")
     typer.echo(
-        f"forecast ({mode}): n={len(records)} failed={len(failures)} "
+        f"forecast ({mode}): n={len(summaries)} failed={len(failures)} "
         f"total_cost=${total_cost:.4f} search_credits={total_credits} (all dry-run)"
     )
     if failures:
         raise typer.Exit(code=1)
+
+
+def _forecast_ensemble_question(
+    snapshot: QuestionSnapshot,
+    settings: EnsembleSettings,
+    client_factory: Callable[[TaskModelConfig], LlmClient],
+    bundle: ResearchBundle | None,
+    research_state: str,
+    *,
+    now: datetime,
+    to_store: list[ForecastRecord],
+    failures: list[str],
+) -> ForecastRecord | None:
+    """Run the ensemble for one question; append member + pooled records to store.
+
+    Returns the pooled record (for the run's cost/credit totals), or ``None`` when
+    the ensemble failed for this question — a failed ensemble is isolated to its
+    question exactly like a failed single pass: it is logged and the loop goes on.
+    The shared bundle's search credits are attributed to the pooled record once
+    and zeroed on the members (and zeroed on the pooled record too when the bundle
+    was cached), so a run's ``search_credits`` never multiplies by member count.
+    """
+    try:
+        result = run_ensemble(
+            snapshot,
+            settings=settings,
+            research=bundle,
+            client_factory=client_factory,
+            now=now,
+        )
+    except LlmError as exc:
+        failures.append(f"q{snapshot.question_id}: {exc}")
+        typer.echo(
+            f"q{snapshot.question_id} (post {snapshot.post_id}): ensemble FAILED ({exc})",
+            err=True,
+        )
+        return None
+
+    pooled = pooled_forecast_record(snapshot, result, research=bundle, now=now)
+    if research_state == "cached":
+        pooled = pooled.model_copy(update={"research_search_credits": 0})
+    # Members share the one bundle; its credits are counted once on the pooled
+    # record, so zero them on every member to avoid multiplying the draw by N.
+    # The bundle itself is also stored once, on the pooled record: members drop
+    # their copy (they all shared the identical bundle), or a 5-member ensemble
+    # would persist six copies of the same multi-KB research per question.
+    members = [
+        member.model_copy(update={"research_search_credits": 0, "research": None})
+        for member in result.member_records
+    ]
+    to_store.extend(members)
+    to_store.append(pooled)
+    _echo_ensemble_summary(pooled, result, research_state)
+    return pooled
 
 
 def _research_for_question(
@@ -484,6 +621,21 @@ def _echo_forecast_summary(record: ForecastRecord, research_state: str) -> None:
         f"q{record.question_id} (post {record.post_id}): "
         f"p={record.probability:.2f} confidence={record.confidence} "
         f"cost={cost} sources={sources} research={research_state}"
+    )
+
+
+def _echo_ensemble_summary(
+    pooled: ForecastRecord, result: EnsembleResult, research_state: str
+) -> None:
+    """Print one per-question pooled-ensemble result line."""
+    cost = "n/a" if pooled.cost_usd is None else f"${pooled.cost_usd:.4f}"
+    n_ok = len(result.member_records)
+    n_failed = len(result.failures)
+    typer.echo(
+        f"q{pooled.question_id} (post {pooled.post_id}): "
+        f"p={pooled.probability:.2f} confidence={pooled.confidence} "
+        f"spread={result.spread:.2f} members={n_ok}ok/{n_failed}failed "
+        f"cost={cost} research={research_state}"
     )
 
 

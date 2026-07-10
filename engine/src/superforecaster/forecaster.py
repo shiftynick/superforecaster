@@ -69,6 +69,36 @@ class ForecastOutput(BaseModel):
     reference_class: str
 
 
+class EnsembleDetail(BaseModel):
+    """Postmortem detail carried by a *pooled* ensemble forecast record.
+
+    Candidate B pools several member forecasts over one shared research bundle.
+    The pooled :class:`ForecastRecord` stores this object so a later postmortem
+    can see, from the single pooled record, exactly what the members said and how
+    the pool was formed — without reassembling the member records by hand.
+
+    Defined here (rather than in ``ensemble.py``) so :class:`ForecastRecord` can
+    reference it without an import cycle: ``ensemble.py`` imports this module.
+
+    Attributes:
+        member_frames: Each surviving member's reasoning frame, in member order.
+        member_models: Each surviving member's model id, in the same order.
+        member_probabilities: Each surviving member's clamped probability, same order.
+        spread: Population std dev of the members' log-odds (the disagreement).
+        coefficient_applied: The extremization coefficient actually used.
+        extremization_mode: ``"fixed"`` or ``"agreement"`` — how it was chosen.
+        member_failures: One ``"label: error"`` string per member that was skipped.
+    """
+
+    member_frames: list[str]
+    member_models: list[str]
+    member_probabilities: list[float]
+    spread: float
+    coefficient_applied: float
+    extremization_mode: str
+    member_failures: list[str]
+
+
 class ForecastRecord(BaseModel):
     """One stored forecast: the answer plus everything needed to audit it.
 
@@ -101,6 +131,16 @@ class ForecastRecord(BaseModel):
     # are a different currency from token dollars and must not be conflated.
     research: ResearchBundle | None = None
     research_search_credits: int = 0
+    # Method/ensemble bookkeeping. ``method`` names how this forecast was made:
+    # ``"checklist-a"`` (the single baseline pass), ``"ensemble-b-member"`` (one
+    # member of a diverse ensemble), or ``"ensemble-b"`` (a pooled ensemble
+    # result). ``frame`` is the reasoning frame for an ensemble member (``None``
+    # otherwise). ``ensemble`` carries the pool's postmortem detail and is set
+    # only on the pooled record. All three default so pre-ensemble JSONL lines
+    # (which lack these fields) still parse.
+    method: str = "checklist-a"
+    frame: str | None = None
+    ensemble: EnsembleDetail | None = None
 
 
 # ``{today}`` is filled in per call so the model knows the current date without
@@ -357,6 +397,7 @@ def run_forecast_pass(
     config: TaskModelConfig | None = None,
     research: ResearchBundle | None = None,
     now: datetime | None = None,
+    system_addendum: str | None = None,
 ) -> ForecastRecord:
     """Forecast one question with a single Claude call and return a full record.
 
@@ -375,6 +416,11 @@ def run_forecast_pass(
             rendered into the prompt and the bundle is stored on the record; when
             ``None`` the model runs blind (the baseline control arm).
         now: Current time (UTC), overridable for deterministic tests.
+        system_addendum: Optional extra system-prompt section appended right after
+            :data:`CHECKLIST_PROMPT` (before the research instruction and output
+            format). This is the injection seam the diverse ensemble uses to layer
+            a reasoning *frame* onto the shared checklist; ``None`` leaves the
+            baseline prompt unchanged.
 
     Returns:
         A :class:`ForecastRecord` — a dry-run forecast with tokens and cost. When
@@ -389,6 +435,8 @@ def run_forecast_pass(
     llm = client if client is not None else build_llm_client(task_config)
 
     system = CHECKLIST_PROMPT.replace("{today}", moment.date().isoformat())
+    if system_addendum is not None:
+        system = f"{system}\n\n{system_addendum}"
     if research is not None:
         system = f"{system}\n\n{RESEARCH_INSTRUCTION}"
     system = f"{system}\n\n{OUTPUT_FORMAT}"

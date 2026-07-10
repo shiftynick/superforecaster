@@ -8,10 +8,12 @@ import pytest
 
 from superforecaster.config import (
     DataSettings,
+    EnsembleMemberConfig,
     RetrievalSettings,
     Settings,
     TaskModelConfig,
     TournamentSettings,
+    load_ensemble_settings,
     load_retrieval_settings,
     load_settings,
     load_task_config,
@@ -201,3 +203,85 @@ def test_load_retrieval_settings_repo_default_resolves() -> None:
     r = load_retrieval_settings()
     assert r.news_provider == "asknews"
     assert r.asknews_monthly_credit_cap > 0
+
+
+# --- Ensemble settings loader -----------------------------------------------
+
+
+def test_load_ensemble_settings_defaults_when_missing(config_path: Path) -> None:
+    # _TOML has no [ensemble] section -> all defaults, incl. the 5-member roster.
+    e = load_ensemble_settings(config_path)
+    assert e.extremization_mode == "fixed"
+    assert e.extremization_coefficient == 1.0
+    assert e.agreement_max_coefficient == 1.3
+    assert e.confidence_high_max_spread == 0.4
+    assert e.confidence_low_min_spread == 1.2
+    assert len(e.members) == 5
+    # The default roster is dominated by the cheap model on all three frames.
+    frames = {m.frame for m in e.members}
+    assert frames == {"outside-first", "inside-first", "status-quo"}
+
+
+def test_load_ensemble_settings_parses_explicit_section(tmp_path: Path) -> None:
+    path = tmp_path / "settings.toml"
+    path.write_text(
+        "[ensemble]\n"
+        'extremization_mode = "agreement"\n'
+        "extremization_coefficient = 1.1\n"
+        "agreement_min_coefficient = 0.9\n"
+        "agreement_max_coefficient = 1.4\n"
+        "confidence_high_max_spread = 0.3\n"
+        "confidence_low_min_spread = 1.0\n"
+        "\n"
+        "[[ensemble.members]]\n"
+        'frame = "inside-first"\n'
+        'provider = "openrouter"\n'
+        'model = "z-ai/glm-5.2"\n'
+        'effort = "low"\n'
+        "max_tokens = 8192\n"
+        "\n"
+        "[[ensemble.members]]\n"
+        'frame = "status-quo"\n'
+        'model = "claude-sonnet-5"\n'
+        "max_tokens = 4096\n",
+        encoding="utf-8",
+    )
+    e = load_ensemble_settings(path)
+    assert e.extremization_mode == "agreement"
+    assert e.extremization_coefficient == pytest.approx(1.1)
+    assert e.agreement_min_coefficient == pytest.approx(0.9)
+    assert e.agreement_max_coefficient == pytest.approx(1.4)
+    assert e.confidence_high_max_spread == pytest.approx(0.3)
+    assert e.confidence_low_min_spread == pytest.approx(1.0)
+    assert e.members == (
+        EnsembleMemberConfig(
+            frame="inside-first",
+            model="z-ai/glm-5.2",
+            max_tokens=8192,
+            effort="low",
+            provider="openrouter",
+        ),
+        # provider/effort absent -> defaults (claude-cli, no effort).
+        EnsembleMemberConfig(frame="status-quo", model="claude-sonnet-5", max_tokens=4096),
+    )
+
+
+def test_load_ensemble_settings_rejects_bad_mode(tmp_path: Path) -> None:
+    path = tmp_path / "settings.toml"
+    path.write_text('[ensemble]\nextremization_mode = "turbo"\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="extremization_mode"):
+        load_ensemble_settings(path)
+
+
+def test_load_ensemble_settings_rejects_member_without_frame(tmp_path: Path) -> None:
+    path = tmp_path / "settings.toml"
+    path.write_text("[[ensemble.members]]\nmodel = 'x'\nmax_tokens = 100\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="frame"):
+        load_ensemble_settings(path)
+
+
+def test_load_ensemble_settings_repo_default_resolves() -> None:
+    """The committed settings.toml [ensemble] section parses via the default path."""
+    e = load_ensemble_settings()
+    assert len(e.members) >= 2
+    assert all(m.frame for m in e.members)

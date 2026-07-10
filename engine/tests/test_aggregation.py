@@ -11,11 +11,13 @@ from hypothesis import strategies as st
 
 from superforecaster.aggregation import (
     PlattParams,
+    agreement_scaled_coefficient,
     extremize,
     from_log_odds,
     platt_apply,
     platt_fit,
     pool_log_odds,
+    population_std,
     to_log_odds,
 )
 from superforecaster.metrics import mean_brier
@@ -85,6 +87,67 @@ def test_extremize_direction_above_half(p: float) -> None:
     # p > 0.5: coefficient > 1 pushes further up, < 1 pulls down toward 0.5.
     assert extremize(p, 2.0) > p
     assert extremize(p, 0.5) < p
+
+
+# --- agreement_scaled_coefficient ---------------------------------------------
+
+log_odds_lists = st.lists(st.floats(min_value=-6.0, max_value=6.0), min_size=1, max_size=8)
+
+
+@given(
+    xs=log_odds_lists,
+    lo=st.floats(min_value=0.5, max_value=1.0),
+    hi=st.floats(min_value=1.0, max_value=2.0),
+)
+def test_agreement_within_bounds(xs: list[float], lo: float, hi: float) -> None:
+    # lo <= 1.0 <= hi by construction, so min <= max always holds.
+    c = agreement_scaled_coefficient(xs, min_coefficient=lo, max_coefficient=hi)
+    assert lo - 1e-9 <= c <= hi + 1e-9
+
+
+@given(v=st.floats(min_value=-6.0, max_value=6.0), n=st.integers(min_value=1, max_value=8))
+def test_agreement_unanimous_gives_max(v: float, n: int) -> None:
+    # Zero spread (identical members) must map to the max coefficient.
+    c = agreement_scaled_coefficient([v] * n, min_coefficient=1.0, max_coefficient=1.3)
+    assert math.isclose(c, 1.3, rel_tol=1e-12, abs_tol=1e-12)
+
+
+@given(xs=log_odds_lists, k=st.floats(min_value=1.0, max_value=4.0))
+def test_agreement_monotone_non_increasing_in_spread(xs: list[float], k: float) -> None:
+    # Scaling every log-odds by k >= 1 multiplies the spread by k (never shrinks
+    # it), so the coefficient must not increase.
+    base = agreement_scaled_coefficient(xs, min_coefficient=1.0, max_coefficient=1.3)
+    wider = agreement_scaled_coefficient(
+        [x * k for x in xs], min_coefficient=1.0, max_coefficient=1.3
+    )
+    assert wider <= base + 1e-9
+
+
+@given(xs=log_odds_lists)
+def test_agreement_identity_when_bounds_equal(xs: list[float]) -> None:
+    # min == max == 1 -> always exactly 1, whatever the spread.
+    assert agreement_scaled_coefficient(xs, min_coefficient=1.0, max_coefficient=1.0) == 1.0
+
+
+def test_agreement_reaches_min_at_ceiling() -> None:
+    # A spread at/above the ceiling clamps to the min coefficient.
+    xs = [-3.0, 3.0]  # population std = 3.0, above the default ceiling of 1.5
+    c = agreement_scaled_coefficient(xs, min_coefficient=1.0, max_coefficient=1.3)
+    assert math.isclose(c, 1.0, abs_tol=1e-12)
+
+
+def test_agreement_errors() -> None:
+    with pytest.raises(ValueError):
+        agreement_scaled_coefficient([], min_coefficient=1.0, max_coefficient=1.3)
+    with pytest.raises(ValueError):
+        agreement_scaled_coefficient([0.0, 1.0], min_coefficient=1.5, max_coefficient=1.0)
+
+
+def test_population_std_examples() -> None:
+    assert population_std([2.0, 2.0, 2.0]) == 0.0
+    assert math.isclose(population_std([-1.0, 1.0]), 1.0, abs_tol=1e-12)
+    with pytest.raises(ValueError):
+        population_std([])
 
 
 def test_platt_errors() -> None:

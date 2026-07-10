@@ -38,6 +38,9 @@ from typing import Literal
 Effort = Literal["low", "medium", "high"]
 _VALID_EFFORTS: frozenset[str] = frozenset({"low", "medium", "high"})
 
+ExtremizationMode = Literal["fixed", "agreement"]
+_VALID_EXTREMIZATION_MODES: frozenset[str] = frozenset({"fixed", "agreement"})
+
 # Built-in fallbacks used when a section (or the whole file) is absent. These are
 # the last link in the settings precedence chain and keep a minimal config valid.
 _DEFAULT_SNAPSHOT_DIR = "./data/snapshots"
@@ -65,6 +68,84 @@ class TaskModelConfig:
     max_tokens: int
     effort: Effort | None = None
     provider: str = "claude-cli"
+
+
+@dataclass(frozen=True)
+class EnsembleMemberConfig:
+    """One member of the diverse ensemble: a reasoning frame plus its model.
+
+    The model fields mirror :class:`TaskModelConfig` (a member is just a forecast
+    pass with a chosen frame), and :meth:`task_config` hands back exactly that so
+    the ensemble runner can drive the existing ``run_forecast_pass`` machinery.
+
+    Attributes:
+        frame: The reasoning-frame key (see ``ensemble.FRAMES``) layered onto the
+            shared checklist — the diversity axis that is not the model.
+        model: The model id or alias to call (empty string = provider default).
+        max_tokens: Maximum tokens the response may use.
+        effort: Optional reasoning-effort hint passed through to the provider.
+        provider: Which LLM backend runs this member's call.
+    """
+
+    frame: str
+    model: str
+    max_tokens: int
+    effort: Effort | None = None
+    provider: str = "claude-cli"
+
+    def task_config(self) -> TaskModelConfig:
+        """Return the :class:`TaskModelConfig` for driving this member's pass."""
+        return TaskModelConfig(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            effort=self.effort,
+            provider=self.provider,
+        )
+
+
+# The v1 default member set (used when ``[ensemble]`` omits its members): the
+# three frames on the cheap GLM-5.2, plus the default outside-first frame on two
+# other models to diversify across providers. Dominated by the cheap model.
+_DEFAULT_ENSEMBLE_MEMBERS: tuple[EnsembleMemberConfig, ...] = (
+    EnsembleMemberConfig("outside-first", "z-ai/glm-5.2", 16384, "low", "openrouter"),
+    EnsembleMemberConfig("inside-first", "z-ai/glm-5.2", 16384, "low", "openrouter"),
+    EnsembleMemberConfig("status-quo", "z-ai/glm-5.2", 16384, "low", "openrouter"),
+    EnsembleMemberConfig("outside-first", "x-ai/grok-4.5", 16384, "low", "openrouter"),
+    EnsembleMemberConfig("outside-first", "claude-sonnet-5", 4096, "low", "claude-cli"),
+)
+
+
+@dataclass(frozen=True)
+class EnsembleSettings:
+    """Tunables for the diverse ensemble (``[ensemble]`` section).
+
+    Config-over-code: the ensemble runner reads pooling/extremization behaviour
+    and its member roster from here rather than hard-coding any of it.
+
+    Attributes:
+        extremization_mode: ``"fixed"`` applies ``extremization_coefficient``
+            directly; ``"agreement"`` derives the coefficient from member spread
+            (see :func:`aggregation.agreement_scaled_coefficient`).
+        extremization_coefficient: The coefficient used when mode is ``"fixed"``
+            (``1.0`` = no extremization).
+        agreement_min_coefficient: Coefficient at maximum member disagreement,
+            used when mode is ``"agreement"``.
+        agreement_max_coefficient: Coefficient at full member agreement, used when
+            mode is ``"agreement"``.
+        confidence_high_max_spread: Member-spread (std dev of log-odds) at or below
+            which the ensemble reports ``"high"`` confidence.
+        confidence_low_min_spread: Member-spread at or above which the ensemble
+            reports ``"low"`` confidence (``"medium"`` between the two thresholds).
+        members: The ensemble roster; defaults to :data:`_DEFAULT_ENSEMBLE_MEMBERS`.
+    """
+
+    extremization_mode: ExtremizationMode = "fixed"
+    extremization_coefficient: float = 1.0
+    agreement_min_coefficient: float = 1.0
+    agreement_max_coefficient: float = 1.3
+    confidence_high_max_spread: float = 0.4
+    confidence_low_min_spread: float = 1.2
+    members: tuple[EnsembleMemberConfig, ...] = _DEFAULT_ENSEMBLE_MEMBERS
 
 
 @dataclass(frozen=True)
@@ -194,27 +275,35 @@ def load_task_config(task: str, path: Path | None = None) -> TaskModelConfig:
     if not isinstance(max_tokens, int) or isinstance(max_tokens, bool):
         raise ValueError(f"[tasks.{task}] is missing an integer 'max_tokens'")
 
-    effort_raw = table.get("effort")
-    effort: Effort | None
-    if effort_raw is None:
-        effort = None
-    elif isinstance(effort_raw, str) and effort_raw in _VALID_EFFORTS:
-        # Narrow to the Literal type for mypy.
-        effort = effort_raw  # type: ignore[assignment]
-    else:
-        raise ValueError(
-            f"[tasks.{task}] effort must be one of low/medium/high, got {effort_raw!r}"
-        )
+    effort = _parse_effort(table, f"[tasks.{task}]")
+    provider = _parse_provider(table, f"[tasks.{task}]")
+    return TaskModelConfig(model=model, max_tokens=max_tokens, effort=effort, provider=provider)
 
+
+def _parse_effort(table: dict[str, object], label: str) -> Effort | None:
+    """Read an optional ``effort`` from a TOML table, validated against the enum.
+
+    ``None`` (absent) is allowed and means "use the provider default". Any other
+    value must be one of ``low``/``medium``/``high``; ``label`` names the table in
+    the error so a bad value points at the offending section.
+    """
+    effort_raw = table.get("effort")
+    if effort_raw is None:
+        return None
+    if isinstance(effort_raw, str) and effort_raw in _VALID_EFFORTS:
+        # Narrow to the Literal type for mypy.
+        return effort_raw  # type: ignore[return-value]
+    raise ValueError(f"{label} effort must be one of low/medium/high, got {effort_raw!r}")
+
+
+def _parse_provider(table: dict[str, object], label: str) -> str:
+    """Read an optional ``provider`` from a TOML table, defaulting to claude-cli."""
     provider_raw = table.get("provider")
     if provider_raw is None:
-        provider = "claude-cli"
-    elif isinstance(provider_raw, str) and provider_raw:
-        provider = provider_raw
-    else:
-        raise ValueError(f"[tasks.{task}] provider must be a non-empty string if set")
-
-    return TaskModelConfig(model=model, max_tokens=max_tokens, effort=effort, provider=provider)
+        return "claude-cli"
+    if isinstance(provider_raw, str) and provider_raw:
+        return provider_raw
+    raise ValueError(f"{label} provider must be a non-empty string if set")
 
 
 def _str_field(table: object, key: str, default: str) -> str:
@@ -279,6 +368,86 @@ def load_retrieval_settings(path: Path | None = None) -> RetrievalSettings:
         reuse_research_max_age_hours=_float_field(
             table, "reuse_research_max_age_hours", d.reuse_research_max_age_hours
         ),
+    )
+
+
+def _parse_ensemble_member(raw: object) -> EnsembleMemberConfig:
+    """Build one :class:`EnsembleMemberConfig` from a ``[[ensemble.members]]`` table.
+
+    Mirrors :func:`load_task_config`'s field strictness (empty ``model`` allowed =
+    provider default; ``max_tokens`` required; effort/provider validated), plus a
+    required non-empty ``frame`` naming the reasoning lens.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("[[ensemble.members]] entries must be tables")
+    frame = raw.get("frame")
+    if not isinstance(frame, str) or not frame:
+        raise ValueError("[[ensemble.members]] entry is missing a non-empty 'frame' string")
+    model = raw.get("model")
+    if not isinstance(model, str):
+        raise ValueError("[[ensemble.members]] entry is missing a 'model' string")
+    max_tokens = raw.get("max_tokens")
+    if not isinstance(max_tokens, int) or isinstance(max_tokens, bool):
+        raise ValueError("[[ensemble.members]] entry is missing an integer 'max_tokens'")
+    effort = _parse_effort(raw, "[[ensemble.members]]")
+    provider = _parse_provider(raw, "[[ensemble.members]]")
+    return EnsembleMemberConfig(
+        frame=frame, model=model, max_tokens=max_tokens, effort=effort, provider=provider
+    )
+
+
+def load_ensemble_settings(path: Path | None = None) -> EnsembleSettings:
+    """Return the :class:`EnsembleSettings` from the ``[ensemble]`` section.
+
+    Every field is optional: a missing ``[ensemble]`` table (or any missing field
+    within it) falls back to the built-in defaults on :class:`EnsembleSettings`,
+    including the default member roster. When ``[[ensemble.members]]`` tables are
+    present they replace the default roster entirely; when absent (or empty) the
+    default roster is kept. The ``SUPERFORECASTER_CONFIG`` env override and
+    default-path resolution match :func:`load_settings`.
+
+    Args:
+        path: Optional explicit config path (defaults to the resolved location).
+    """
+    table = _load_toml(path).get("ensemble")
+    d = EnsembleSettings()  # defaults, including the default member roster
+    if not isinstance(table, dict):
+        return d
+
+    mode_raw = table.get("extremization_mode")
+    if mode_raw is None:
+        mode: ExtremizationMode = d.extremization_mode
+    elif isinstance(mode_raw, str) and mode_raw in _VALID_EXTREMIZATION_MODES:
+        mode = mode_raw  # type: ignore[assignment]
+    else:
+        raise ValueError(
+            f"[ensemble] extremization_mode must be one of fixed/agreement, got {mode_raw!r}"
+        )
+
+    members_raw = table.get("members")
+    if isinstance(members_raw, list) and members_raw:
+        members = tuple(_parse_ensemble_member(m) for m in members_raw)
+    else:
+        members = d.members
+
+    return EnsembleSettings(
+        extremization_mode=mode,
+        extremization_coefficient=_float_field(
+            table, "extremization_coefficient", d.extremization_coefficient
+        ),
+        agreement_min_coefficient=_float_field(
+            table, "agreement_min_coefficient", d.agreement_min_coefficient
+        ),
+        agreement_max_coefficient=_float_field(
+            table, "agreement_max_coefficient", d.agreement_max_coefficient
+        ),
+        confidence_high_max_spread=_float_field(
+            table, "confidence_high_max_spread", d.confidence_high_max_spread
+        ),
+        confidence_low_min_spread=_float_field(
+            table, "confidence_low_min_spread", d.confidence_low_min_spread
+        ),
+        members=members,
     )
 
 

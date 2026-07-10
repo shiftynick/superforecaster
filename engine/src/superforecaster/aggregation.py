@@ -79,6 +79,74 @@ def pool_log_odds(probabilities: Sequence[float], weights: Sequence[float] | Non
     return from_log_odds(pooled)
 
 
+def population_std(values: Sequence[float]) -> float:
+    """Population standard deviation of ``values`` (divides by ``n``, not ``n-1``).
+
+    Used as the *spread* signal for an ensemble: how far apart the members'
+    log-odds are. Zero when every value is identical (unanimity). Raises
+    ``ValueError`` on empty input.
+    """
+    n = len(values)
+    if n == 0:
+        raise ValueError("population_std requires at least one value")
+    mean = math.fsum(values) / n
+    variance = math.fsum((v - mean) ** 2 for v in values) / n
+    return math.sqrt(variance)
+
+
+def agreement_scaled_coefficient(
+    log_odds_values: Sequence[float],
+    *,
+    min_coefficient: float,
+    max_coefficient: float,
+    spread_floor: float = 0.0,
+    spread_ceiling: float = 1.5,
+) -> float:
+    """Pick an extremization coefficient from how much the members agree.
+
+    The idea (a field-survey graft): a *tight* cluster of independent forecasts is
+    strong collective evidence and warrants pushing the pooled number further from
+    50%; a *scattered* cluster is weak evidence and warrants little or no push. So
+    we map the members' **spread** (the population std dev of their log-odds) onto
+    a coefficient that runs the opposite way — high agreement (low spread) gives a
+    high coefficient (extremize more), high disagreement gives ``min_coefficient``.
+
+    The spread is linearly mapped from ``[spread_floor, spread_ceiling]`` onto
+    ``[max_coefficient, min_coefficient]`` and clamped outside that range: a spread
+    at or below ``spread_floor`` yields ``max_coefficient``, one at or above
+    ``spread_ceiling`` yields ``min_coefficient``.
+
+    Args:
+        log_odds_values: The members' forecasts, already in log-odds space.
+        min_coefficient: Coefficient at maximum disagreement (spread ceiling).
+        max_coefficient: Coefficient at full agreement (spread floor).
+        spread_floor: Spread at/below which agreement counts as total.
+        spread_ceiling: Spread at/above which disagreement counts as total.
+
+    Returns:
+        A coefficient in ``[min_coefficient, max_coefficient]``.
+
+    Raises:
+        ValueError: If ``log_odds_values`` is empty or ``min_coefficient`` exceeds
+            ``max_coefficient``.
+    """
+    if not log_odds_values:
+        raise ValueError("agreement_scaled_coefficient requires at least one value")
+    if min_coefficient > max_coefficient:
+        raise ValueError("min_coefficient must not exceed max_coefficient")
+
+    spread = population_std(log_odds_values)
+    span = spread_ceiling - spread_floor
+    if span <= 0.0:
+        # Degenerate range: everything at/below the floor is full agreement.
+        fraction = 0.0 if spread <= spread_floor else 1.0
+    else:
+        fraction = (spread - spread_floor) / span
+        fraction = min(1.0, max(0.0, fraction))
+    # fraction 0 -> max_coefficient (agree), fraction 1 -> min_coefficient (differ).
+    return max_coefficient + fraction * (min_coefficient - max_coefficient)
+
+
 def extremize(probability: float, coefficient: float) -> float:
     """Push a probability away from (or toward) 50% by scaling its log-odds.
 
