@@ -524,11 +524,36 @@ def test_forecast_one_failure_still_stores_others(
 
 
 def test_forecast_without_cli_exits(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # Pin the task config to claude-cli so this test does not depend on which
+    # provider the real settings.toml currently selects (the control panel is
+    # the owner's to change; tests must not break when it does).
+    config = tmp_path / "settings.toml"
+    config.write_text(
+        '[tasks.forecast_pass]\nprovider = "claude-cli"\nmodel = "m"\nmax_tokens = 100\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SUPERFORECASTER_CONFIG", str(config))
     monkeypatch.setattr("superforecaster.llm.check_claude_cli", lambda path="claude": False)
     monkeypatch.chdir(tmp_path)  # avoid picking up a stray .env
     result = runner.invoke(cli.app, ["forecast", "--data-dir", str(tmp_path)])
     assert result.exit_code == 1
     assert "Claude Code" in result.output
+
+
+def test_forecast_openrouter_without_key_exits(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = tmp_path / "settings.toml"
+    config.write_text(
+        '[tasks.forecast_pass]\nprovider = "openrouter"\nmodel = "m"\nmax_tokens = 100\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SUPERFORECASTER_CONFIG", str(config))
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)  # avoid picking up a stray .env
+    result = runner.invoke(cli.app, ["forecast", "--data-dir", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "OPENROUTER_API_KEY" in result.output
 
 
 def test_forecast_no_matching_questions(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

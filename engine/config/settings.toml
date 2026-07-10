@@ -37,11 +37,29 @@ sandbox = "bot-testing-area"         # unscored test tournament
 #                donated tournament credits arrive on an OpenRouter key, so that
 #                real cost is the true draw against them.
 
+# Testing default (2026-07-09): GLM-5.2 via OpenRouter — cheap ($0.53/$1.67 per
+# Mtok) with real-dollar cost from the API. Verified OpenRouter ids for the
+# current playground pair: "z-ai/glm-5.2" and "x-ai/grok-4.5" ($2/$6 per Mtok).
 [tasks.forecast_pass]
-provider = "claude-cli"
-model = "claude-sonnet-5"
+provider = "openrouter"
+model = "z-ai/glm-5.2"
 effort = "low"                       # testing default; raise for real runs
-max_tokens = 4096
+max_tokens = 16384                   # honored by openrouter; reasoning tokens
+                                     # count against it, so leave real headroom
+
+# Alternative: same task on Grok 4.5 (swap in for the table above).
+# [tasks.forecast_pass]
+# provider = "openrouter"
+# model = "x-ai/grok-4.5"
+# effort = "low"
+# max_tokens = 4096
+
+# Alternative: the Claude subscription via the Claude Code CLI (previous default).
+# [tasks.forecast_pass]
+# provider = "claude-cli"
+# model = "claude-sonnet-5"
+# effort = "low"
+# max_tokens = 4096
 
 # Query generation for the research/retrieval stack: one cheap LLM call that
 # turns a question into 2–4 web-search queries (one aimed at its resolution

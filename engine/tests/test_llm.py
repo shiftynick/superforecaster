@@ -547,6 +547,45 @@ def test_openrouter_success_parses_cost_from_usage() -> None:
     assert result.model == "openai/gpt-4o-mini"
 
 
+def test_openrouter_byok_cost_sums_upstream_inference_cost() -> None:
+    # BYOK accounts report cost=0 with the real spend in cost_details.
+    # upstream_inference_cost (verified live 2026-07-09); the two must be summed
+    # or every BYOK call reads as free.
+    body = _openrouter_payload(
+        usage={
+            "prompt_tokens": 9,
+            "completion_tokens": 10,
+            "cost": 0,
+            "is_byok": True,
+            "cost_details": {"upstream_inference_cost": 7.35e-06},
+        }
+    )
+    client = OpenRouterClient(api_key="k", transport=_fixed_transport(body=body))
+
+    result = client.run(system="s", prompt="p", model="openai/gpt-4o-mini")
+
+    assert result.cost_usd == pytest.approx(7.35e-06)
+
+
+def test_openrouter_non_byok_cost_ignores_upstream_to_avoid_double_count() -> None:
+    # On a normal (non-BYOK) call, upstream_inference_cost is what the provider
+    # charged OpenRouter — informational, nearly equal to cost. Summing would
+    # double-count; cost alone is the account's charge.
+    body = _openrouter_payload(
+        usage={
+            "prompt_tokens": 25,
+            "completion_tokens": 93,
+            "cost": 0.000293,
+            "cost_details": {"upstream_inference_cost": 0.000296},
+        }
+    )
+    client = OpenRouterClient(api_key="k", transport=_fixed_transport(body=body))
+
+    result = client.run(system="s", prompt="p", model="z-ai/glm-5.2")
+
+    assert result.cost_usd == pytest.approx(0.000293)
+
+
 def test_openrouter_cost_falls_back_to_price_for_when_absent() -> None:
     # usage without a "cost" field → fall back to the pricing table. The default
     # config prices claude-sonnet-5 at $3/$15 per Mtok.

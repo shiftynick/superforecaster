@@ -758,12 +758,44 @@ class OpenRouterClient:
             raise LlmError(f"OpenRouter request failed: {exc}") from exc
 
 
+def _openrouter_cost(usage: dict[str, Any]) -> float | None:
+    """Total real-dollar cost of one OpenRouter call, or ``None`` if unreported.
+
+    Billing depends on ``usage.is_byok`` (verified live 2026-07-09 on both paths):
+
+    - **BYOK call** (``is_byok`` true — the account's own provider key served
+      it): ``usage.cost`` is OpenRouter's fee (0 within the free allowance) and
+      the real model spend is ``usage.cost_details.upstream_inference_cost`` —
+      the two are separate bills and are summed. Reading ``cost`` alone would
+      report every BYOK call as free.
+    - **Normal call** (``is_byok`` false/absent): ``usage.cost`` is the full
+      charge to the account's credits; ``upstream_inference_cost``, when present,
+      is what the provider charged *OpenRouter* (informational — nearly equal to
+      ``cost``), so summing would double-count. Use ``cost`` alone.
+    """
+
+    def _num(value: object) -> float | None:
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            return float(value)
+        return None
+
+    cost = _num(usage.get("cost"))
+    if not usage.get("is_byok"):
+        return cost
+    details = usage.get("cost_details")
+    upstream = _num(details.get("upstream_inference_cost")) if isinstance(details, dict) else None
+    if cost is None and upstream is None:
+        return None
+    return (cost or 0.0) + (upstream or 0.0)
+
+
 def _result_from_openrouter(payload: dict[str, Any], model: str) -> LlmResult:
     """Turn an OpenRouter chat-completions reply into an :class:`LlmResult`.
 
     Text comes from ``choices[0].message.content``; token counts from
     ``usage.prompt_tokens``/``completion_tokens``; ``stop_reason`` from
-    ``choices[0].finish_reason``. Cost is the real-dollar ``usage.cost`` when the
+    ``choices[0].finish_reason``. Cost is the real-dollar total from
+    :func:`_openrouter_cost` (OpenRouter charge + BYOK upstream charge) when the
     API reports it, else the priced-token fallback from ``config.price_for``.
     """
     choices = payload.get("choices")
@@ -786,12 +818,10 @@ def _result_from_openrouter(payload: dict[str, Any], model: str) -> LlmResult:
     if isinstance(usage, dict):
         input_tokens = _as_int(usage.get("prompt_tokens"))
         output_tokens = _as_int(usage.get("completion_tokens"))
-        cost_raw = usage.get("cost")
-        if isinstance(cost_raw, int | float) and not isinstance(cost_raw, bool):
-            cost_usd = float(cost_raw)
+        cost_usd = _openrouter_cost(usage)
 
     # Real-dollar cost from the API needs no guess; only fall back to the pricing
-    # table when the API omitted cost (rare).
+    # table when the API omitted cost entirely (rare).
     if cost_usd is None:
         cost_usd = price_for(model, input_tokens, output_tokens)
 
