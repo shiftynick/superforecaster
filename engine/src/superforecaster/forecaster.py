@@ -39,6 +39,7 @@ from pydantic import BaseModel, Field, ValidationError
 from .config import TaskModelConfig, load_task_config, price_for
 from .llm import LlmClient, LlmError, LlmResult, build_llm_client
 from .models import QuestionSnapshot
+from .research import ResearchBundle
 
 Confidence = Literal["low", "medium", "high"]
 
@@ -92,6 +93,14 @@ class ForecastRecord(BaseModel):
     cost_usd: float | None
     dry_run: bool = True
     submitted_at: datetime | None = None
+    # Retrieval bookkeeping. ``research`` is the frozen bundle the forecast was
+    # made from (``None`` for the blind baseline). ``research_search_credits``
+    # surfaces the metered search draw at the record's top level so the cost
+    # story is legible without opening the nested bundle — it is deliberately
+    # kept *separate* from ``cost_usd`` (which stays LLM-only): search credits
+    # are a different currency from token dollars and must not be conflated.
+    research: ResearchBundle | None = None
+    research_search_credits: int = 0
 
 
 # ``{today}`` is filled in per call so the model knows the current date without
@@ -160,6 +169,49 @@ and the strongest case against your number,
 }
 
 Output nothing after the closing brace of that JSON object."""
+
+
+# Appended to the system prompt ONLY when a research bundle is supplied. It
+# supersedes the checklist's "no web access" framing: the model now has sources
+# and must weigh them, cite them, and reason critically about their quality.
+RESEARCH_INSTRUCTION = """\
+RESEARCH PROVIDED
+
+A SOURCES section accompanies the question below. This SUPERSEDES the "no web \
+access" note above: you have been given real research gathered for this \
+question. Use it as follows:
+
+- Read every source. Weigh each by quality and recency: prefer authoritative, \
+on-topic, recent sources (official bodies, primary reporting) and discount \
+low-quality, off-topic, or stale ones.
+- Sources can be wrong, biased, or irrelevant. Reason critically — do not simply \
+trust a source because it is listed.
+- When a source moves your estimate, CITE it by its number (e.g. [S3]) in your \
+rationale so a reviewer can trace the evidence.
+- Absence of evidence is still information: if the sources do not settle the \
+question, say so and stay appropriately humble."""
+
+
+def _render_sources(research: ResearchBundle) -> str:
+    """Render a numbered SOURCES block from a research bundle for the prompt.
+
+    Each result becomes one ``[S<n>]`` entry with its title, source domain, and
+    publish date (``date unknown`` when absent). The body shown is the extracted
+    document text when we successfully fetched that URL, otherwise the search
+    snippet — so the model always sees the fullest content we have per source.
+    """
+    docs_by_url = {doc.url: doc for doc in research.docs if doc.ok and doc.text}
+    lines = ["SOURCES"]
+    for index, result in enumerate(research.results, start=1):
+        title = result.title.strip() or "(untitled)"
+        domain = result.source_domain or "unknown source"
+        when = result.published_at.date().isoformat() if result.published_at else "date unknown"
+        doc = docs_by_url.get(result.url)
+        body = doc.text.strip() if doc is not None else result.snippet.strip()
+        if not body:
+            body = "(no content extracted)"
+        lines.append(f"[S{index}] {title}\n    source: {domain} | published: {when}\n    {body}")
+    return "\n\n".join(lines)
 
 
 def _extract_json_object(text: str) -> str:
@@ -241,12 +293,17 @@ def _parse_output(text: str) -> ForecastOutput:
     return ForecastOutput.model_validate(data)
 
 
-def _build_user_prompt(snapshot: QuestionSnapshot) -> str:
+def _build_user_prompt(
+    snapshot: QuestionSnapshot,
+    research: ResearchBundle | None = None,
+) -> str:
     """Assemble the per-question user message from the snapshot's fields.
 
     Only the fields that help the model reason are included, each under a clear
     header. Empty fields are labelled ``(none provided)`` rather than omitted, so
     the model can tell "no fine print" from "fine print I forgot to include".
+    When a research bundle is supplied its SOURCES block is inserted just before
+    the final instruction, so the sources read as evidence for the answer.
     """
 
     def _section(label: str, value: str) -> str:
@@ -263,8 +320,10 @@ def _build_user_prompt(snapshot: QuestionSnapshot) -> str:
         _section("FINE PRINT", snapshot.fine_print),
         _when("SCHEDULED CLOSE TIME", snapshot.scheduled_close_time),
         _when("SCHEDULED RESOLVE TIME", snapshot.scheduled_resolve_time),
-        "Give your probability that this question resolves YES.",
     ]
+    if research is not None:
+        parts.append(_render_sources(research))
+    parts.append("Give your probability that this question resolves YES.")
     return "\n\n".join(parts)
 
 
@@ -296,6 +355,7 @@ def run_forecast_pass(
     *,
     client: LlmClient | None = None,
     config: TaskModelConfig | None = None,
+    research: ResearchBundle | None = None,
     now: datetime | None = None,
 ) -> ForecastRecord:
     """Forecast one question with a single Claude call and return a full record.
@@ -311,6 +371,9 @@ def run_forecast_pass(
             Defaults to the client for the task's configured provider. Tests pass
             a fake.
         config: Model settings; defaults to the ``forecast_pass`` task config.
+        research: Optional frozen research bundle. When given, its sources are
+            rendered into the prompt and the bundle is stored on the record; when
+            ``None`` the model runs blind (the baseline control arm).
         now: Current time (UTC), overridable for deterministic tests.
 
     Returns:
@@ -326,8 +389,10 @@ def run_forecast_pass(
     llm = client if client is not None else build_llm_client(task_config)
 
     system = CHECKLIST_PROMPT.replace("{today}", moment.date().isoformat())
+    if research is not None:
+        system = f"{system}\n\n{RESEARCH_INSTRUCTION}"
     system = f"{system}\n\n{OUTPUT_FORMAT}"
-    user_prompt = _build_user_prompt(snapshot)
+    user_prompt = _build_user_prompt(snapshot, research)
 
     # Advisory schema for providers that support server-side structured output
     # (Codex CLI constrains its final message to it). Claude CLI ignores it and
@@ -387,4 +452,6 @@ def run_forecast_pass(
         cost_usd=cost_usd,
         dry_run=True,
         submitted_at=None,
+        research=research,
+        research_search_credits=research.search_credits_used if research is not None else 0,
     )

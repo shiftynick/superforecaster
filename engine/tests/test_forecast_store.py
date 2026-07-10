@@ -5,8 +5,11 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from superforecaster.extract import TIER_HTTPX_TRAFILATURA, ExtractedDoc
 from superforecaster.forecast_store import ForecastStore
 from superforecaster.forecaster import ForecastRecord
+from superforecaster.research import ResearchBundle
+from superforecaster.search import SearchResult
 
 BASE = datetime(2026, 7, 9, 12, 0, tzinfo=UTC)
 
@@ -73,6 +76,54 @@ def test_stats(tmp_path: Path) -> None:
     assert s.dry_run == 2
     assert s.submitted == 1
     assert s.total_cost_usd == 0.03  # unpriced record contributes nothing
+
+
+def test_record_with_research_bundle_roundtrips(tmp_path: Path) -> None:
+    bundle = ResearchBundle(
+        queries=["q1", "q2"],
+        results=[
+            SearchResult(
+                url="https://ex.com/a",
+                title="A",
+                snippet="snip",
+                published_at=BASE,
+                source_domain="ex.com",
+                provider="asknews",
+                raw={"raw_content": "kept short"},
+            )
+        ],
+        docs=[
+            ExtractedDoc(
+                url="https://ex.com/a",
+                text="body",
+                title="A",
+                published_at=BASE,
+                tier=TIER_HTTPX_TRAFILATURA,
+                ok=True,
+            )
+        ],
+        tier_stats={TIER_HTTPX_TRAFILATURA: 1},
+        search_credits_used=4,
+        news_quota_exhausted=True,
+        retrieved_at=BASE,
+        input_tokens=100,
+        output_tokens=40,
+        cost_usd=0.001,
+    )
+    record = _record(1).model_copy(update={"research": bundle, "research_search_credits": 4})
+
+    store = ForecastStore(tmp_path)
+    store.append([record])
+    (loaded,) = list(store.iter_all())
+
+    assert loaded.research_search_credits == 4
+    assert loaded.research is not None
+    assert loaded.research.queries == ["q1", "q2"]
+    assert loaded.research.results[0].url == "https://ex.com/a"
+    assert loaded.research.results[0].published_at == BASE
+    assert loaded.research.docs[0].tier == TIER_HTTPX_TRAFILATURA
+    assert loaded.research.tier_stats == {TIER_HTTPX_TRAFILATURA: 1}
+    assert loaded.research.news_quota_exhausted is True
 
 
 def test_empty_store(tmp_path: Path) -> None:

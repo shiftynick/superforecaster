@@ -7,6 +7,7 @@ dependencies = [
     "anthropic>=0.116.0",
     "httpx>=0.28.1",
     "pydantic>=2.13.4",
+    "trafilatura>=2.1.0",
     "typer>=0.26.8",
 ]
 
@@ -39,6 +40,11 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 strict = true
 files = ["src", "tests"]
+
+# trafilatura ships no type stubs; treat its imports as untyped.
+[[tool.mypy.overrides]]
+module = ["trafilatura.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -37,6 +37,15 @@ model = "claude-sonnet-5"
 effort = "low"                       # testing default; raise for real runs
 max_tokens = 4096
 
+# Query generation for the research/retrieval stack: one cheap LLM call that
+# turns a question into 2–4 web-search queries (one aimed at its resolution
+# source). Kept small and low-effort — it is a routing step, not the forecast.
+[tasks.query_gen]
+provider = "claude-cli"
+model = "claude-sonnet-5"
+effort = "low"
+max_tokens = 1024
+
 # Alternative: run the same task on the Codex subscription instead. Swap the
 # [tasks.forecast_pass] table above for this one (only one may be active).
 # Codex constrains its output to the forecast JSON Schema via --output-schema.
@@ -57,3 +66,33 @@ max_tokens = 4096
 [pricing.claude-sonnet-5]
 input_per_mtok = 3.0
 output_per_mtok = 15.0
+
+# [retrieval] — the research/retrieval stack (search + content extraction).
+#   All fields are optional; omitting the section (or any field) uses the
+#   defaults shown. Secrets (ASK_NEWS_API_KEY, TAVILY_API_KEY, optional
+#   JINA_API_KEY) live in engine/.env, never here.
+#
+#   news_provider              : search client for the news role ("asknews").
+#   general_provider           : search client for the general-web role ("tavily").
+#   max_results                : results requested per search call.
+#   max_fetches_per_question   : cap on content fetches per forecast question.
+#   asknews_monthly_credit_cap : hard monthly AskNews credit cap; the client
+#                                refuses to call once exceeding it. 900 leaves
+#                                headroom under the 1,000-credit free tier.
+#   extract_min_chars          : quality gate — shorter extracted text = failure.
+#   extract_min_words          : quality gate — fewer words than this = failure.
+#   max_doc_chars              : cap on extracted-doc text stored in a research
+#                                bundle and handed to the prompt (keeps records
+#                                reviewable); longer bodies are truncated.
+#   timeout_seconds            : per-request HTTP timeout (search + extraction).
+
+[retrieval]
+news_provider = "asknews"
+general_provider = "tavily"
+max_results = 5
+max_fetches_per_question = 8
+asknews_monthly_credit_cap = 900
+extract_min_chars = 500
+extract_min_words = 80
+max_doc_chars = 8000
+timeout_seconds = 20.0

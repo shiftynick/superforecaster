@@ -21,13 +21,16 @@ from typing import cast
 
 import typer
 
-from .config import load_settings, load_task_config
+from .config import RetrievalSettings, load_retrieval_settings, load_settings, load_task_config
 from .dotenv import load_dotenv as _load_dotenv
+from .extract import Extractor, build_extractor
 from .forecast_store import ForecastStore
 from .forecaster import ForecastRecord, run_forecast_pass
-from .llm import LlmClient, LlmError, check_provider_cli
+from .llm import LlmClient, LlmError, build_llm_client, check_provider_cli
 from .metaculus import MetaculusClient
 from .models import QuestionSnapshot, SkipPost
+from .research import ResearchBundle, run_research
+from .search import SearchClient, build_search_client, read_asknews_credits_used
 from .store import SnapshotStore
 from .submission import SubmissionClient, SubmissionError
 
@@ -125,6 +128,41 @@ def _build_llm_client() -> LlmClient | None:
     return None
 
 
+# Seam for tests: monkeypatched to inject fake search clients.
+def _build_search_clients(
+    settings: RetrievalSettings, data_dir: Path
+) -> tuple[SearchClient, SearchClient]:
+    """Build the (news, general) search clients from ``[retrieval]`` settings.
+
+    The news client is told it fills the news role (``news_role=True``) so a
+    Tavily-in-the-news-slot config still gets publish dates. Keys come from the
+    environment inside ``build_search_client``. Tests monkeypatch this seam.
+    """
+    news = build_search_client(
+        settings.news_provider, settings=settings, data_dir=data_dir, news_role=True
+    )
+    general = build_search_client(
+        settings.general_provider, settings=settings, data_dir=data_dir, news_role=False
+    )
+    return news, general
+
+
+# Seam for tests: monkeypatched to inject a fake extractor.
+def _build_extractor(settings: RetrievalSettings) -> Extractor:
+    """Build the content extractor from ``[retrieval]`` settings (test seam)."""
+    return build_extractor(settings)
+
+
+# Seam for tests: monkeypatched to inject a fake query-gen LLM client.
+def _build_research_llm() -> LlmClient | None:
+    """Return ``None`` so the forecast command builds the query-gen client itself.
+
+    Mirrors :func:`_build_llm_client`: tests monkeypatch this to inject a fake
+    that returns a queries JSON object, distinct from the forecast-pass fake.
+    """
+    return None
+
+
 # Seam for tests: monkeypatched to return a fake submission client.
 def _build_submission_client(token: str) -> SubmissionClient:
     """Construct the real submission client. Tests replace this to inject a fake."""
@@ -213,7 +251,8 @@ def update_resolutions(
 @app.command()
 def stats(data_dir: Path | None = _DataDirOption) -> None:
     """Print a human-readable summary of the stored snapshots."""
-    store = SnapshotStore(_resolve_data_dir(data_dir))
+    snap_dir = _resolve_data_dir(data_dir)
+    store = SnapshotStore(snap_dir)
     s = store.stats()
     typer.echo(f"data dir:           {store.dir}")
     typer.echo(f"total records:      {s.total_records}")
@@ -221,6 +260,13 @@ def stats(data_dir: Path | None = _DataDirOption) -> None:
     typer.echo(f"resolved questions: {s.resolved_questions}")
     typer.echo(f"first scrape:       {s.first_scrape}")
     typer.echo(f"last scrape:        {s.last_scrape}")
+
+    # AskNews credit draw for the current month, read from the data-root counter
+    # (parent of the snapshot dir). No API key or network needed — just the file.
+    retrieval = load_retrieval_settings()
+    used = read_asknews_credits_used(snap_dir.parent)
+    cap = retrieval.asknews_monthly_credit_cap
+    typer.echo(f"asknews credits:    {used}/{cap} (this month)")
 
 
 _ForecastDirOption = typer.Option(
@@ -293,17 +339,26 @@ def forecast(
     closing_within_days: int = typer.Option(
         90, "--closing-within-days", help="Only questions closing within this many days."
     ),
+    no_research: bool = typer.Option(
+        False,
+        "--no-research",
+        help="Skip retrieval and forecast blind (the baseline control arm).",
+    ),
     data_dir: Path | None = _DataDirOption,
     forecast_dir: Path | None = _ForecastDirOption,
     post_id: list[int] = _PostIdOption,
 ) -> None:
-    """Run a baseline (no-retrieval) forecast pass over open tournament questions.
+    """Forecast open tournament questions, with web research on by default.
 
-    All forecasts are dry runs in v0 — nothing is submitted anywhere. Each
-    question costs one Claude call; the per-call token cost is logged.
+    Each question is researched (query generation -> news + general search ->
+    content extraction) into a frozen bundle that is rendered into the prompt and
+    stored with the forecast. ``--no-research`` forecasts blind, preserving the
+    baseline for side-by-side comparison. All forecasts are dry runs — nothing is
+    submitted. Per-question LLM cost and search-credit draw are both logged.
     """
     _require_llm_cli()
-    snap_store = SnapshotStore(_resolve_data_dir(data_dir))
+    snap_dir = _resolve_data_dir(data_dir)
+    snap_store = SnapshotStore(snap_dir)
     fc_store = ForecastStore(_resolve_forecast_dir(forecast_dir))
     now = datetime.now(UTC)
 
@@ -321,19 +376,87 @@ def forecast(
     config = load_task_config("forecast_pass")
     client = _build_llm_client()
 
+    # Research context. Built once and reused across questions; the quota counter
+    # lives in the data root (the parent of the snapshot dir), config-derived so
+    # there is never a hard-coded absolute path.
+    research_ctx = None if no_research else _open_research_context(snap_dir)
+
     records: list[ForecastRecord] = []
-    for snapshot in questions:
-        record = run_forecast_pass(snapshot, client=client, config=config)
-        records.append(record)
-        cost = "n/a" if record.cost_usd is None else f"${record.cost_usd:.4f}"
-        typer.echo(
-            f"q{record.question_id} (post {record.post_id}): "
-            f"p={record.probability:.2f} confidence={record.confidence} cost={cost}"
-        )
+    try:
+        for snapshot in questions:
+            bundle: ResearchBundle | None = None
+            if research_ctx is not None:
+                bundle = run_research(
+                    snapshot,
+                    research_ctx.llm,
+                    research_ctx.news,
+                    research_ctx.general,
+                    research_ctx.extractor,
+                    research_ctx.settings,
+                )
+            record = run_forecast_pass(snapshot, client=client, config=config, research=bundle)
+            records.append(record)
+            _echo_forecast_summary(record)
+    finally:
+        if research_ctx is not None:
+            research_ctx.close()
 
     fc_store.append(records)
     total_cost = sum(r.cost_usd for r in records if r.cost_usd is not None)
-    typer.echo(f"forecast: n={len(records)} total_cost=${total_cost:.4f} (all dry-run)")
+    total_credits = sum(r.research_search_credits for r in records)
+    mode = "blind" if no_research else "researched"
+    typer.echo(
+        f"forecast ({mode}): n={len(records)} total_cost=${total_cost:.4f} "
+        f"search_credits={total_credits} (all dry-run)"
+    )
+
+
+def _echo_forecast_summary(record: ForecastRecord) -> None:
+    """Print one per-question forecast result line (id, probability, cost, sources)."""
+    cost = "n/a" if record.cost_usd is None else f"${record.cost_usd:.4f}"
+    sources = "-" if record.research is None else str(len(record.research.results))
+    typer.echo(
+        f"q{record.question_id} (post {record.post_id}): "
+        f"p={record.probability:.2f} confidence={record.confidence} "
+        f"cost={cost} sources={sources}"
+    )
+
+
+class _ResearchContext:
+    """The clients the research pipeline needs, built once and closed together."""
+
+    def __init__(
+        self,
+        llm: LlmClient,
+        news: SearchClient,
+        general: SearchClient,
+        extractor: Extractor,
+        settings: RetrievalSettings,
+    ) -> None:
+        self.llm = llm
+        self.news = news
+        self.general = general
+        self.extractor = extractor
+        self.settings = settings
+
+    def close(self) -> None:
+        """Close each underlying client that exposes a ``close`` method."""
+        for client in (self.news, self.general, self.extractor):
+            closer = getattr(client, "close", None)
+            if callable(closer):
+                closer()
+
+
+def _open_research_context(snapshot_dir: Path) -> _ResearchContext:
+    """Build the research clients from settings, keyed to the data-root quota file."""
+    settings = load_retrieval_settings()
+    data_root = snapshot_dir.parent
+    news, general = _build_search_clients(settings, data_root)
+    extractor = _build_extractor(settings)
+    llm = _build_research_llm()
+    if llm is None:
+        llm = build_llm_client(load_task_config("query_gen"))
+    return _ResearchContext(llm, news, general, extractor, settings)
 
 
 @app.command("submit-tournament")

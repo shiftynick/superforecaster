@@ -9,8 +9,10 @@ import pytest
 from typer.testing import CliRunner
 
 from superforecaster import cli
+from superforecaster.extract import TIER_HTTPX_TRAFILATURA, ExtractedDoc
 from superforecaster.llm import LlmResult
 from superforecaster.metaculus import MetaculusClient
+from superforecaster.search import SearchResult
 
 from . import fixtures
 
@@ -92,6 +94,25 @@ def test_stats_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     assert "unique questions:   1" in result.output
 
 
+def test_stats_shows_asknews_credits(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import json
+    from datetime import date
+
+    snap_dir = tmp_path / "snapshots"
+    _install_fake(monkeypatch, [fixtures.open_binary_post(101, 201)])
+    runner.invoke(cli.app, ["scrape", "--data-dir", str(snap_dir)])
+
+    # The counter lives in the data root (parent of the snapshot dir).
+    month = date.today().strftime("%Y-%m")
+    (tmp_path / "asknews_quota.json").write_text(
+        json.dumps({"month": month, "credits_used": 17}), encoding="utf-8"
+    )
+
+    result = runner.invoke(cli.app, ["stats", "--data-dir", str(snap_dir)])
+    assert result.exit_code == 0, result.output
+    assert "asknews credits:    17/900" in result.output
+
+
 def test_build_client_returns_real_client() -> None:
     """The seam builds a real client when not monkeypatched (constructor smoke)."""
     client = cli._build_client("tok")
@@ -140,6 +161,75 @@ def _seed_open_question(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
     runner.invoke(cli.app, ["scrape", "--data-dir", str(tmp_path)])
 
 
+class _FakeQueryLlm:
+    """Stands in for the query-gen LLM; returns a fixed queries JSON object."""
+
+    def run(
+        self,
+        system: str,
+        prompt: str,
+        model: str,
+        max_tokens: int | None = None,
+        json_schema: dict[str, object] | None = None,
+        effort: str | None = None,
+    ) -> LlmResult:
+        return LlmResult(
+            text='{"queries": ["rate cut news", "fomc statement"]}',
+            input_tokens=80,
+            output_tokens=20,
+            cost_usd=0.0005,
+            stop_reason="end_turn",
+            model=model,
+        )
+
+
+class _FakeSearch:
+    """A fake search client returning one fixed result; meters credits."""
+
+    def __init__(self, url: str, *, provider: str, credits: int = 0) -> None:
+        self._url = url
+        self._provider = provider
+        self._credits = credits
+        self.used = 0
+
+    def search(self, query: str, *, max_results: int, **_: object) -> list[SearchResult]:
+        self.used += self._credits
+        return [
+            SearchResult(
+                url=self._url,
+                title=f"Result for {query}",
+                snippet="short",
+                published_at=None,
+                source_domain="example.com",
+                provider=self._provider,
+                raw={},
+            )
+        ]
+
+    def credits_used_this_month(self) -> int:
+        return self.used
+
+
+class _FakeExtractor:
+    def extract(self, url: str) -> ExtractedDoc:
+        return ExtractedDoc(
+            url=url,
+            text="Extracted body about the FOMC decision and rate path.",
+            title="Extracted",
+            published_at=None,
+            tier=TIER_HTTPX_TRAFILATURA,
+            ok=True,
+        )
+
+
+def _install_research_fakes(monkeypatch: pytest.MonkeyPatch) -> None:
+    news = _FakeSearch("https://news.example/a", provider="asknews", credits=2)
+    general = _FakeSearch("https://web.example/b", provider="tavily")
+    monkeypatch.setattr(cli, "_build_research_llm", lambda: _FakeQueryLlm())
+    monkeypatch.setattr(cli, "_build_search_clients", lambda settings, data_dir: (news, general))
+    monkeypatch.setattr(cli, "_build_extractor", lambda settings: _FakeExtractor())
+
+
 def test_forecast_smoke(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     snap_dir = tmp_path / "snapshots"
     fc_dir = tmp_path / "forecasts"
@@ -152,6 +242,7 @@ def test_forecast_smoke(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
         cli.app,
         [
             "forecast",
+            "--no-research",
             "--data-dir",
             str(snap_dir),
             "--forecast-dir",
@@ -164,6 +255,7 @@ def test_forecast_smoke(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
     assert "p=0.42" in result.output
     assert "confidence=medium" in result.output
     assert "n=1" in result.output
+    assert "blind" in result.output
 
     from superforecaster.forecast_store import ForecastStore
 
@@ -171,6 +263,45 @@ def test_forecast_smoke(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
     assert len(stored) == 1
     assert stored[0].dry_run is True
     assert stored[0].reference_class == "comparable questions"
+    assert stored[0].research is None  # --no-research: blind control arm
+
+
+def test_forecast_with_research_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    snap_dir = tmp_path / "snapshots"
+    fc_dir = tmp_path / "forecasts"
+    _seed_open_question(monkeypatch, snap_dir)
+
+    monkeypatch.setattr(cli, "_build_llm_client", lambda: _FakeLlm())
+    _install_research_fakes(monkeypatch)
+    _pass_cli_check(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "forecast",  # research ON by default
+            "--data-dir",
+            str(snap_dir),
+            "--forecast-dir",
+            str(fc_dir),
+            "--closing-within-days",
+            "365",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "researched" in result.output
+    assert "search_credits=4" in result.output  # 2 queries x 2 credits/news call
+    assert "sources=2" in result.output
+
+    from superforecaster.forecast_store import ForecastStore
+
+    (stored,) = list(ForecastStore(fc_dir).iter_all())
+    assert stored.research is not None
+    assert stored.research.queries == ["rate cut news", "fomc statement"]
+    assert stored.research_search_credits == 4
+    assert {r.url for r in stored.research.results} == {
+        "https://news.example/a",
+        "https://web.example/b",
+    }
 
 
 def test_forecast_without_cli_exits(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

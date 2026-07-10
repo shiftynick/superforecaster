@@ -17,6 +17,8 @@ Four things live in that TOML file and are read here:
 - **Pricing** (``[pricing.<model>]``): dollars per million tokens, used only to
   turn a call's token counts into a logged cost. :func:`price_for` does that
   arithmetic and returns ``None`` when a model has no price on file.
+- **Retrieval** (``[retrieval]``): provider roles, budgets, and extraction
+  quality gates for the research stack. Read by :func:`load_retrieval_settings`.
 
 The config file is found relative to this source file by default
 (``src/superforecaster/config.py`` -> ``engine/config/settings.toml``), but the
@@ -89,6 +91,44 @@ class TournamentSettings:
 
     live: str
     sandbox: str
+
+
+@dataclass(frozen=True)
+class RetrievalSettings:
+    """Tunables for the research/retrieval stack (``[retrieval]`` section).
+
+    Every field is config-over-code: the search and extraction layers read these
+    rather than hard-coding provider names, budgets, or quality thresholds.
+
+    Attributes:
+        news_provider: Which search client fills the *news* role (``"asknews"``).
+        general_provider: Which search client fills the *general web* role
+            (``"tavily"``).
+        max_results: Default number of results to request per search call.
+        max_fetches_per_question: Cap on content fetches per forecast question
+            (a budget guard used by the slice-2 research pipeline).
+        asknews_monthly_credit_cap: Hard monthly cap on AskNews credits; the
+            client refuses to call once this would be exceeded. Default 900
+            leaves headroom under the 1,000-credit free tier.
+        extract_min_chars: Quality gate — extracted text shorter than this many
+            characters counts as an extraction failure (fall to the next tier).
+        extract_min_words: Quality gate — extracted text with fewer than this
+            many words counts as a failure.
+        max_doc_chars: Cap on the extracted-document text stored in a research
+            bundle (and handed to the prompt). Longer bodies are truncated so
+            forecast records stay reviewable.
+        timeout_seconds: Per-request HTTP timeout for search and extraction.
+    """
+
+    news_provider: str = "asknews"
+    general_provider: str = "tavily"
+    max_results: int = 5
+    max_fetches_per_question: int = 8
+    asknews_monthly_credit_cap: int = 900
+    extract_min_chars: int = 500
+    extract_min_words: int = 80
+    max_doc_chars: int = 8000
+    timeout_seconds: float = 20.0
 
 
 @dataclass(frozen=True)
@@ -179,6 +219,59 @@ def _str_field(table: object, key: str, default: str) -> str:
         if isinstance(value, str) and value:
             return value
     return default
+
+
+def _int_field(table: object, key: str, default: int) -> int:
+    """Read an integer ``key`` from a TOML table, else return ``default``.
+
+    ``bool`` is rejected (it is an ``int`` subclass in Python but never a valid
+    count here), matching the strictness of :func:`load_task_config`.
+    """
+    if isinstance(table, dict):
+        value = table.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return default
+
+
+def _float_field(table: object, key: str, default: float) -> float:
+    """Read a numeric ``key`` from a TOML table as ``float``, else ``default``."""
+    if isinstance(table, dict):
+        value = table.get(key)
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            return float(value)
+    return default
+
+
+def load_retrieval_settings(path: Path | None = None) -> RetrievalSettings:
+    """Return the :class:`RetrievalSettings` from the ``[retrieval]`` section.
+
+    Every field is optional: a missing ``[retrieval]`` table (or any missing
+    field within it) falls back to the built-in defaults on
+    :class:`RetrievalSettings`, so a minimal config still loads. The
+    ``SUPERFORECASTER_CONFIG`` env override and default-path resolution match
+    :func:`load_settings`.
+
+    Args:
+        path: Optional explicit config path (defaults to the resolved location).
+    """
+    table = _load_toml(path).get("retrieval")
+    d = RetrievalSettings()  # defaults
+    return RetrievalSettings(
+        news_provider=_str_field(table, "news_provider", d.news_provider),
+        general_provider=_str_field(table, "general_provider", d.general_provider),
+        max_results=_int_field(table, "max_results", d.max_results),
+        max_fetches_per_question=_int_field(
+            table, "max_fetches_per_question", d.max_fetches_per_question
+        ),
+        asknews_monthly_credit_cap=_int_field(
+            table, "asknews_monthly_credit_cap", d.asknews_monthly_credit_cap
+        ),
+        extract_min_chars=_int_field(table, "extract_min_chars", d.extract_min_chars),
+        extract_min_words=_int_field(table, "extract_min_words", d.extract_min_words),
+        max_doc_chars=_int_field(table, "max_doc_chars", d.max_doc_chars),
+        timeout_seconds=_float_field(table, "timeout_seconds", d.timeout_seconds),
+    )
 
 
 def load_settings(path: Path | None = None) -> Settings:

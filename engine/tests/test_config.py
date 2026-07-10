@@ -8,9 +8,11 @@ import pytest
 
 from superforecaster.config import (
     DataSettings,
+    RetrievalSettings,
     Settings,
     TaskModelConfig,
     TournamentSettings,
+    load_retrieval_settings,
     load_settings,
     load_task_config,
     price_for,
@@ -149,3 +151,53 @@ def test_load_settings_repo_default_resolves() -> None:
     settings = load_settings()
     assert settings.tournament.live
     assert settings.data.snapshot_dir
+
+
+# --- Retrieval settings loader ----------------------------------------------
+
+
+def test_load_retrieval_settings_reads_section(tmp_path: Path) -> None:
+    path = tmp_path / "settings.toml"
+    path.write_text(
+        "[retrieval]\n"
+        'news_provider = "asknews"\n'
+        'general_provider = "tavily"\n'
+        "max_results = 7\n"
+        "max_fetches_per_question = 3\n"
+        "asknews_monthly_credit_cap = 500\n"
+        "extract_min_chars = 300\n"
+        "extract_min_words = 50\n"
+        "timeout_seconds = 12.5\n",
+        encoding="utf-8",
+    )
+    r = load_retrieval_settings(path)
+    assert r == RetrievalSettings(
+        news_provider="asknews",
+        general_provider="tavily",
+        max_results=7,
+        max_fetches_per_question=3,
+        asknews_monthly_credit_cap=500,
+        extract_min_chars=300,
+        extract_min_words=50,
+        timeout_seconds=12.5,
+    )
+
+
+def test_load_retrieval_settings_defaults_when_missing(config_path: Path) -> None:
+    # _TOML has no [retrieval] section -> all defaults.
+    assert load_retrieval_settings(config_path) == RetrievalSettings()
+
+
+def test_load_retrieval_settings_partial_fills_missing(tmp_path: Path) -> None:
+    path = tmp_path / "settings.toml"
+    path.write_text("[retrieval]\nmax_results = 9\n", encoding="utf-8")
+    r = load_retrieval_settings(path)
+    assert r.max_results == 9
+    assert r.asknews_monthly_credit_cap == 900  # default preserved
+
+
+def test_load_retrieval_settings_repo_default_resolves() -> None:
+    """The committed settings.toml [retrieval] section parses via default path."""
+    r = load_retrieval_settings()
+    assert r.news_provider == "asknews"
+    assert r.asknews_monthly_credit_cap > 0

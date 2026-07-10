@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from superforecaster.config import TaskModelConfig
+from superforecaster.extract import TIER_HTTPX_TRAFILATURA, ExtractedDoc
 from superforecaster.forecaster import (
     CHECKLIST_PROMPT,
     OUTPUT_FORMAT,
@@ -24,6 +25,8 @@ from superforecaster.forecaster import (
 )
 from superforecaster.llm import LlmError, LlmResult
 from superforecaster.models import QuestionSnapshot
+from superforecaster.research import ResearchBundle
+from superforecaster.search import SearchResult
 
 NOW = datetime(2026, 7, 9, 12, 0, tzinfo=UTC)
 CONFIG = TaskModelConfig(model="claude-sonnet-5", max_tokens=4096, effort=None)
@@ -226,6 +229,90 @@ def test_cost_none_for_unpriced_model(tmp_path: Path) -> None:
     finally:
         del os.environ["SUPERFORECASTER_CONFIG"]
     assert record.cost_usd is None
+
+
+def _bundle() -> ResearchBundle:
+    result = SearchResult(
+        url="https://fed.gov/statement",
+        title="FOMC leaves rates unchanged",
+        snippet="The committee held the target range steady in July.",
+        published_at=datetime(2026, 7, 5, tzinfo=UTC),
+        source_domain="fed.gov",
+        provider="asknews",
+        raw={},
+    )
+    no_date = SearchResult(
+        url="https://blog.example/take",
+        title="One analyst's take",
+        snippet="A cut looks likely by autumn.",
+        published_at=None,
+        source_domain="blog.example",
+        provider="tavily",
+        raw={},
+    )
+    doc = ExtractedDoc(
+        url="https://fed.gov/statement",
+        text="Full extracted statement body: the FOMC maintained the range and signalled patience.",
+        title="FOMC statement",
+        published_at=datetime(2026, 7, 5, tzinfo=UTC),
+        tier=TIER_HTTPX_TRAFILATURA,
+        ok=True,
+    )
+    return ResearchBundle(
+        queries=["fomc july statement"],
+        results=[result, no_date],
+        docs=[doc],
+        tier_stats={TIER_HTTPX_TRAFILATURA: 1},
+        search_credits_used=3,
+        news_quota_exhausted=False,
+        retrieved_at=NOW,
+        input_tokens=100,
+        output_tokens=40,
+        cost_usd=0.001,
+    )
+
+
+def test_research_renders_sources_into_prompt() -> None:
+    client = _FakeLlm(_result(_fenced()))
+    run_forecast_pass(_snapshot(), client=client, config=CONFIG, research=_bundle(), now=NOW)
+
+    call = client.calls[0]
+    # Sources block, with titles, domains, dates (and a "date unknown" fallback).
+    assert "SOURCES" in call["prompt"]
+    assert "[S1]" in call["prompt"] and "[S2]" in call["prompt"]
+    assert "FOMC leaves rates unchanged" in call["prompt"]
+    assert "fed.gov" in call["prompt"]
+    assert "2026-07-05" in call["prompt"]
+    assert "date unknown" in call["prompt"]
+    # Fetched source shows extracted body; unfetched falls back to its snippet.
+    assert "Full extracted statement body" in call["prompt"]
+    assert "A cut looks likely by autumn." in call["prompt"]
+    # The system prompt gains the research instruction (cite sources, weigh quality).
+    assert "RESEARCH PROVIDED" in call["system"]
+    assert "[S3]" in call["system"] or "cite" in call["system"].lower()
+
+
+def test_research_bundle_and_credits_stored_on_record() -> None:
+    client = _FakeLlm(_result(_fenced()))
+    record = run_forecast_pass(
+        _snapshot(), client=client, config=CONFIG, research=_bundle(), now=NOW
+    )
+    assert record.research is not None
+    assert record.research.queries == ["fomc july statement"]
+    assert record.research_search_credits == 3
+    # cost_usd stays LLM-only (the forecast pass), not folded with search credits.
+    assert record.cost_usd == pytest.approx(0.02)
+
+
+def test_no_research_omits_sources_and_instruction() -> None:
+    client = _FakeLlm(_result(_fenced()))
+    record = run_forecast_pass(_snapshot(), client=client, config=CONFIG, now=NOW)
+    assert record.research is None
+    assert record.research_search_credits == 0
+    assert "SOURCES" not in client.calls[0]["prompt"]
+    assert "RESEARCH PROVIDED" not in client.calls[0]["system"]
+    # The blind baseline keeps its "no web access" framing.
+    assert "no web access" in client.calls[0]["system"].lower()
 
 
 def test_checklist_prompt_is_documented() -> None:
