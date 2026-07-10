@@ -33,6 +33,13 @@ from .config import (
 )
 from .dotenv import load_dotenv as _load_dotenv
 from .ensemble import EnsembleResult, pooled_forecast_record, run_ensemble
+from .experiments import (
+    ExperimentManifest,
+    ExperimentStatus,
+    compute_status,
+    load_manifests,
+    resolutions_from_store,
+)
 from .extract import Extractor, build_extractor
 from .forecast_store import ForecastStore
 from .forecaster import ForecastRecord, run_forecast_pass
@@ -819,6 +826,137 @@ def _echo_forecast_line(record: ForecastRecord, status: str) -> None:
         f"q{record.question_id} (post {record.post_id}): "
         f"p={record.probability:.2f} confidence={record.confidence} cost={cost} [{status}]"
     )
+
+
+_ExperimentsDirOption = typer.Option(
+    None,
+    "--experiments-dir",
+    help="Directory of experiment manifests (*.toml). Defaults to ./docs/experiments.",
+)
+
+
+def _refresh_pinned_resolutions(
+    store: SnapshotStore,
+    manifests: list[ExperimentManifest],
+) -> int:
+    """Re-check resolutions for JUST the pinned questions still open in the store.
+
+    Reuses the ``update-resolutions`` machinery (the Metaculus client's
+    ``get_post`` + ``QuestionSnapshot.from_api_post`` + append), but scoped to the
+    union of every manifest's pinned questions whose latest snapshot is not yet
+    resolved — so a refresh spends network only on the experiments' own open
+    questions, not the whole store. Returns how many newly resolved.
+    """
+    pinned: set[int] = set()
+    for manifest in manifests:
+        pinned |= manifest.pinned
+
+    latest = store.latest_by_question()
+    # Map pinned, still-open question ids to their post ids for the API fetch.
+    post_ids = [
+        snapshot.post_id
+        for qid, snapshot in latest.items()
+        if qid in pinned and snapshot.status.lower() != "resolved"
+    ]
+    if not post_ids:
+        return 0
+
+    token = _require_token()
+    scraped_at = datetime.now(UTC)
+    snapshots: list[QuestionSnapshot] = []
+    newly_resolved = 0
+    client = _build_client(token)
+    try:
+        for post_id in post_ids:
+            post = client.get_post(post_id)
+            try:
+                snapshot = QuestionSnapshot.from_api_post(post, scraped_at)
+            except SkipPost:
+                continue
+            snapshots.append(snapshot)
+            if snapshot.status.lower() == "resolved":
+                newly_resolved += 1
+    finally:
+        client.close()
+
+    store.append(snapshots)
+    return newly_resolved
+
+
+def _echo_experiment_status(status: ExperimentStatus) -> None:
+    """Print one experiment's compact interim report."""
+    m = status.manifest
+    n_pinned = len(m.question_ids)
+    typer.echo(f"=== Experiment {m.id}: {m.title}")
+    typer.echo(f"    status={m.status} frozen={m.frozen.isoformat()} questions={n_pinned}")
+
+    for arm in status.arms:
+        unknown = f" (+{arm.unknown_cost_records} unknown-cost)" if arm.unknown_cost_records else ""
+        typer.echo(
+            f"    arm {arm.spec.name} [{arm.spec.label}]: "
+            f"coverage={arm.coverage}/{n_pinned} records={arm.matched_records} "
+            f"cost=${arm.total_cost_usd:.4f}{unknown}"
+        )
+
+    n_resolved = len(status.resolved_qids)
+    typer.echo(f"    resolved: {n_resolved}/{n_pinned} pinned questions resolved yes/no")
+
+    delta = status.paired_brier_delta
+    if delta is None:
+        typer.echo("    paired Brier delta (B-A): n/a (no question resolved with both arms yet)")
+    else:
+        typer.echo(
+            f"    paired Brier delta (B-A): {delta:+.4f} over N={len(status.paired)} "
+            "resolved paired questions (directional only; see the experiment doc's power check)"
+        )
+
+    typer.echo(
+        f"    budget: ${status.total_known_cost_usd:.4f} known spend of ${m.budget_usd:.2f} "
+        f"(${status.budget_remaining_usd:.2f} remaining)"
+    )
+
+
+@app.command("experiment-status")
+def experiment_status(
+    refresh: bool = typer.Option(
+        False,
+        "--refresh",
+        help=(
+            "Re-check resolutions for the experiments' pinned, still-open questions "
+            "before reporting (spends network). Off by default."
+        ),
+    ),
+    data_dir: Path | None = _DataDirOption,
+    forecast_dir: Path | None = _ForecastDirOption,
+    experiments_dir: Path | None = _ExperimentsDirOption,
+) -> None:
+    """Report interim progress for every pre-registered experiment.
+
+    Reads the manifests in ``docs/experiments/*.toml``, matches stored forecast
+    records to each arm, and prints coverage, resolutions, the interim paired
+    Brier delta, and budget per experiment. ``--refresh`` first re-checks
+    resolutions for just the pinned unresolved questions (reusing the
+    ``update-resolutions`` machinery), so an interim score reflects the latest
+    outcomes.
+    """
+    manifests = load_manifests(experiments_dir)
+    if not manifests:
+        typer.echo("experiment-status: no experiment manifests found.")
+        return
+
+    snap_store = SnapshotStore(_resolve_data_dir(data_dir))
+    fc_store = ForecastStore(_resolve_forecast_dir(forecast_dir))
+
+    if refresh:
+        newly = _refresh_pinned_resolutions(snap_store, manifests)
+        typer.echo(f"refresh: re-checked pinned open questions, newly_resolved={newly}")
+
+    latest = snap_store.latest_by_question()
+    records = list(fc_store.iter_all())
+    for manifest in manifests:
+        resolutions = resolutions_from_store(latest, manifest.question_ids)
+        status = compute_status(manifest, records, resolutions)
+        _echo_experiment_status(status)
 
 
 if __name__ == "__main__":  # pragma: no cover

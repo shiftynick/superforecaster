@@ -1,0 +1,45 @@
+# Machine-readable manifest for experiment 001 — mirrors
+# 001-ensemble-vs-baseline.md EXACTLY. The markdown is the human record of the
+# pre-registration; this file is what `experiment-status` reads to score
+# progress. If the two ever disagree, the markdown is authoritative (it is the
+# frozen artifact) and this file is the bug.
+#
+# Arm matching: each [arms.X] table names the record fields that identify a
+# forecast as belonging to that arm. A stored ForecastRecord carries `method`
+# ("checklist-a" single pass, "ensemble-b" pooled result, "ensemble-b-member"
+# for the individual members that feed a pool) and `model`. An arm matches a
+# record when the record's `method` equals the arm's `method` AND (if the arm
+# pins a `model`) the record's `model` equals it. Member records
+# (method="ensemble-b-member") deliberately match NEITHER arm: the ensemble arm
+# is scored on its single pooled record per question, not its members.
+# Only forecasts made ON or AFTER `frozen` count toward the experiment.
+
+id = "001"
+title = "Candidate B ensemble vs. candidate A baseline (forward, frozen-context)"
+status = "frozen"
+frozen = 2026-07-10
+budget_usd = 40.0
+asknews_credit_budget = 250
+
+# The 40 pinned question ids (soonest-resolving first), frozen 2026-07-10.
+question_ids = [
+    43937, 40795, 43716, 43612, 43507, 44373, 43892, 44422, 43873, 44011,
+    44017, 44256, 35710, 44139, 43852, 44248, 43854, 39432, 43522, 43506,
+    44250, 43737, 43432, 44014, 43738, 44634, 44423, 44406, 43908, 43882,
+    43870, 43732, 43503, 43430, 43510, 43360, 44547, 44415, 44253, 44241,
+]
+
+# Arm A — candidate A baseline: a single checklist forecast pass on GLM-5.2.
+[arms.A]
+label = "single (baseline)"
+kind = "single"
+method = "checklist-a"
+model = "z-ai/glm-5.2"
+
+# Arm B — candidate B ensemble: the pooled record (method="ensemble-b"). The
+# pooled record's model field is itself "ensemble-b"; matching on `method` is
+# sufficient, so no model is pinned here.
+[arms.B]
+label = "ensemble"
+kind = "ensemble-pooled"
+method = "ensemble-b"
