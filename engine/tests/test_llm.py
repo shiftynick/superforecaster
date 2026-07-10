@@ -80,7 +80,9 @@ def test_argv_contains_expected_flags() -> None:
 
     argv = runner.calls[0]["argv"]
     assert argv[0] == "claude"
-    assert "-p" in argv and argv[argv.index("-p") + 1] == "the user"
+    # The user prompt is piped via stdin, never argv (Windows ~32k argv limit).
+    assert "-p" in argv and "the user" not in argv
+    assert runner.calls[0]["kwargs"]["input"] == "the user"
     assert "--system-prompt" in argv
     assert argv[argv.index("--system-prompt") + 1] == "the system"
     assert "--model" in argv and argv[argv.index("--model") + 1] == "claude-sonnet-5"
@@ -118,8 +120,8 @@ def test_env_passed_to_runner_lacks_api_key(monkeypatch: pytest.MonkeyPatch) -> 
     env = runner.calls[0]["kwargs"]["env"]
     assert "ANTHROPIC_API_KEY" not in env
     assert env["KEEP_ME"] == "yes"
-    # stdin is closed so the CLI does not warn about an open stdin.
-    assert runner.calls[0]["kwargs"]["stdin"] == subprocess.DEVNULL
+    # The prompt rides stdin; subprocess closes the pipe after writing it.
+    assert runner.calls[0]["kwargs"]["input"] == "p"
 
 
 def test_is_error_envelope_raises() -> None:
@@ -381,8 +383,11 @@ def test_codex_argv_and_schema_file() -> None:
     argv = runner.calls[0]["argv"]
     assert argv[0] == "codex"
     assert argv[1] == "exec"
-    # System + user prompt are combined into the single prompt argument.
-    assert "the system" in argv[2] and "the user" in argv[2]
+    # "-" makes codex read the prompt from stdin (Windows ~32k argv limit);
+    # system + user prompt are combined into that piped input.
+    assert argv[2] == "-"
+    piped = runner.calls[0]["kwargs"]["input"]
+    assert "the system" in piped and "the user" in piped
     assert "--skip-git-repo-check" in argv
     assert argv[argv.index("-s") + 1] == "read-only"
     assert "--json" in argv
@@ -430,14 +435,16 @@ def test_codex_empty_model_omits_flag_and_schema_optional() -> None:
     assert "--output-schema" not in argv
 
 
-def test_codex_stdin_devnull_and_empty_cwd() -> None:
+def test_codex_stdin_prompt_and_empty_cwd() -> None:
     runner = _CodexFakeRunner(_codex_completed(_CODEX_STDOUT))
     client = CodexCliClient(runner=runner)
 
     client.run(system="s", prompt="p", model="m")
 
     kwargs = runner.calls[0]["kwargs"]
-    assert kwargs["stdin"] == subprocess.DEVNULL
+    # The combined prompt is piped via stdin; the pipe closes after writing, so
+    # codex's block-on-open-stdin behavior is not triggered.
+    assert kwargs["input"] == "s\n\n---\n\np"
     cwd = kwargs["cwd"]
     # The working directory was a real, empty temp dir at call time (snapshotted
     # by the fake runner) — not the repo root, so Codex cannot ingest project

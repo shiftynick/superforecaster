@@ -22,8 +22,9 @@ Two subscription-billing safeguards live in :class:`ClaudeCliClient`:
 
 - ``ANTHROPIC_API_KEY`` is stripped from the subprocess environment, so a stray
   key can never silently redirect billing to the metered API.
-- ``stdin`` is closed (``DEVNULL``); otherwise the CLI prints a warning to
-  stderr about an open stdin.
+- The user prompt is piped via ``stdin`` (never argv): researched prompts carry
+  multi-source context and overflow Windows' ~32k command-line limit as an
+  argument. The pipe is closed after writing, so neither CLI hangs on it.
 """
 
 from __future__ import annotations
@@ -137,10 +138,10 @@ def _stderr_tail(stderr: str | None, max_lines: int = 8) -> str | None:
 class ClaudeCliClient:
     """Run one-shot prompts through the Claude Code CLI (subscription billing).
 
-    Each :meth:`run` shells out to ``claude -p <prompt> --system-prompt <system>
-    --model <model> --output-format json`` and parses the single JSON result
-    envelope the CLI prints. The subprocess gets ``stdin=DEVNULL`` and an
-    environment with ``ANTHROPIC_API_KEY`` removed (see module docstring).
+    Each :meth:`run` shells out to ``claude -p --system-prompt <system>
+    --model <model> --output-format json`` with the user prompt piped to stdin,
+    and parses the single JSON result envelope the CLI prints. The subprocess
+    environment has ``ANTHROPIC_API_KEY`` removed (see module docstring).
     """
 
     def __init__(
@@ -196,10 +197,14 @@ class ClaudeCliClient:
         del max_tokens  # documented no-op: the print-mode CLI has no such flag.
         del json_schema  # documented no-op: schema is advisory for this provider.
 
+        # The user prompt goes in via STDIN, not argv: researched prompts carry
+        # multi-source context and blow past Windows' ~32k CreateProcess
+        # command-line limit as an argument (seen live: WinError 206). `claude -p`
+        # with no positional prompt reads the prompt from stdin; subprocess closes
+        # the pipe after writing, so the CLI still terminates normally.
         argv = [
             self._claude_path,
             "-p",
-            prompt,
             "--system-prompt",
             system,
             "--output-format",
@@ -218,7 +223,7 @@ class ClaudeCliClient:
         try:
             completed = self._runner(
                 argv,
-                stdin=subprocess.DEVNULL,
+                input=prompt,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -304,15 +309,16 @@ def _as_int(value: object) -> int:
 class CodexCliClient:
     """Run one-shot prompts through the Codex CLI (owner's Codex subscription).
 
-    Each :meth:`run` shells out to ``codex exec <prompt> --skip-git-repo-check
-    -s read-only --json`` and parses the JSONL event stream it prints. Codex has
-    no separate system-prompt flag in ``exec`` mode, so the system and user
-    prompts are concatenated into the single prompt argument with a delimiter.
+    Each :meth:`run` shells out to ``codex exec - --skip-git-repo-check
+    -s read-only --json`` with the prompt piped to stdin, and parses the JSONL
+    event stream it prints. Codex has no separate system-prompt flag in ``exec``
+    mode, so the system and user prompts are concatenated with a delimiter.
 
     Three facts about ``codex exec`` shape this client (verified live on
     codex-cli 0.140.0):
 
-    - It **blocks forever if stdin stays open**, so we pass ``stdin=DEVNULL``.
+    - It **blocks forever if stdin stays open** — fine here: subprocess writes
+      the piped prompt and closes the pipe (``exec -`` reads stdin to EOF).
     - It **ingests the working directory's context** (``AGENTS.md`` and friends —
       ~18k input tokens on a trivial prompt when run inside a repo), so each call
       runs in a fresh empty temp directory that is removed afterwards.
@@ -385,10 +391,14 @@ class CodexCliClient:
         del max_tokens  # documented no-op: codex exec has no output-cap flag.
 
         combined_prompt = f"{system}\n\n---\n\n{prompt}"
+        # Prompt goes in via STDIN (`codex exec -` reads it there): as an argv
+        # element, researched prompts exceed Windows' ~32k command-line limit
+        # (WinError 206). subprocess writes the input then closes the pipe, so
+        # the "blocks forever if stdin stays open" hazard does not apply.
         argv = [
             self._codex_path,
             "exec",
-            combined_prompt,
+            "-",
             "--skip-git-repo-check",
             "-s",
             "read-only",
@@ -415,7 +425,7 @@ class CodexCliClient:
             try:
                 completed = self._runner(
                     argv,
-                    stdin=subprocess.DEVNULL,
+                    input=combined_prompt,
                     capture_output=True,
                     text=True,
                     encoding="utf-8",

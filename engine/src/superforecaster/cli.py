@@ -449,6 +449,10 @@ class _ResearchContext:
 
 def _open_research_context(snapshot_dir: Path) -> _ResearchContext:
     """Build the research clients from settings, keyed to the data-root quota file."""
+    # The search keys live in .env; the token helpers load it for their commands,
+    # but a dry-run forecast never calls those — load it here too.
+    _load_dotenv(Path("engine/.env"))
+    _load_dotenv(Path(".env"))
     settings = load_retrieval_settings()
     data_root = snapshot_dir.parent
     news, general = _build_search_clients(settings, data_root)

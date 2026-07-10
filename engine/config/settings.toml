@@ -49,12 +49,14 @@ max_tokens = 1024
 # Alternative: run the same task on the Codex subscription instead. Swap the
 # [tasks.forecast_pass] table above for this one (only one may be active).
 # Codex constrains its output to the forecast JSON Schema via --output-schema.
-# Leave model = "" to use the Codex CLI's own default model, or name one
-# explicitly (e.g. "gpt-5.1-codex"). Pricing is optional and cost is notional
-# under the subscription, so no [pricing.*] entry is required.
+# NOTE (2026-07-09): do NOT leave model = "" for codex-cli right now — the CLI
+# default inherits the owner's global ~/.codex/config.toml model ("gpt-5.6-sol"),
+# which current CLI versions refuse to run. "gpt-5.5" is verified accepted on
+# the ChatGPT-account plan. Pricing is optional and cost is notional under the
+# subscription, so no [pricing.*] entry is required.
 # [tasks.forecast_pass]
 # provider = "codex-cli"
-# model = "gpt-5.1-codex"
+# model = "gpt-5.5"
 # effort = "low"
 # max_tokens = 4096
 
