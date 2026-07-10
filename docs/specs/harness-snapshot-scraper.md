@@ -47,7 +47,7 @@ The scraper's CP extraction is correct, but the Metaculus API returns `aggregati
 | # | Gate | Artifact for human review |
 |---|---|---|
 | **C1** | Vertical slice done (this run) | Real scraped snapshots on disk, math module test results, CLI demo output, review summary |
-| **C2** | Before search-context capture | ADR proposing the search provider (cost, ToS, coverage), any API-key ask |
+| **C2** | Before search-context capture | ADR proposing the search provider (cost, ToS, coverage), any API-key ask — **presented 2026-07-09: [ADR-0004](../adr/0004-retrieval-stack.md) (AskNews + Tavily, tiered extraction), awaiting owner sign-off + account setup** |
 | **C3** | Before first real backtest | The pre-registration format + a dry-run experiment record |
 
 ## Agent execution plan (this run)
