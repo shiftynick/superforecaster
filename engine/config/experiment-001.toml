@@ -1,0 +1,228 @@
+# FROZEN CONFIG — experiment 001 arm B (docs/experiments/001-ensemble-vs-baseline.md).
+# Do not edit after the freeze date (2026-07-10). Differs from settings.toml only in
+# extremization_mode ("agreement" — the registered experimental value; the shipped
+# default remains "fixed"). Run via: SUPERFORECASTER_CONFIG=engine/config/experiment-001.toml
+#
+# Superforecaster engine settings — the control panel.
+#
+# This one file holds all non-secret engine configuration: the config-over-code
+# rule in practice. Which model each task uses, how many tokens it may spend,
+# how much each model costs, where data is stored, and which tournaments to
+# forecast — all live here, never as literals buried in the logic.
+#
+# Secrets (tokens) never go here; they live in engine/.env by design.
+#
+# Any section may be omitted — the loader falls back to sensible defaults — so a
+# minimal file still works. Paths are resolved relative to the repo root (run
+# CLI commands from there).
+
+[data]
+snapshot_dir = "./data/snapshots"    # question snapshots (scraper output)
+forecast_dir = "./data/forecasts"    # forecast records
+
+[tournament]
+live = "summer-futureeval-2026"      # scored AIB tournament ($50k) — --live required
+sandbox = "bot-testing-area"         # unscored test tournament
+
+# [tasks.<name>] — one table per task type the engine performs.
+#   model      : the model id or alias to call.
+#   max_tokens : hard cap on the response length (required by the API).
+#   effort     : OPTIONAL. Omit for the CLI default. If set, must be one of
+#                "low" | "medium" | "high" — passed straight through to the
+#                provider CLI (Claude: --effort; Codex: model_reasoning_effort)
+#                to trade latency/cost for more careful reasoning.
+#   provider   : OPTIONAL. Which LLM backend runs the call. Defaults to
+#                "claude-cli" (the Claude Code CLI on the owner's subscription).
+#                Also supported: "codex-cli" (the Codex CLI on the owner's Codex
+#                subscription) and "openrouter" (a plain HTTPS API keyed by
+#                OPENROUTER_API_KEY in engine/.env — NOT a CLI). For openrouter,
+#                'model' is REQUIRED (it has no default model), 'max_tokens' is
+#                actually honored (the CLIs ignore it), and the logged cost is
+#                REAL dollars from usage.cost — not notional. The Metaculus-
+#                donated tournament credits arrive on an OpenRouter key, so that
+#                real cost is the true draw against them.
+
+# Testing default (2026-07-09): GLM-5.2 via OpenRouter — cheap ($0.53/$1.67 per
+# Mtok) with real-dollar cost from the API. Verified OpenRouter ids for the
+# current playground pair: "z-ai/glm-5.2" and "x-ai/grok-4.5" ($2/$6 per Mtok).
+[tasks.forecast_pass]
+provider = "openrouter"
+model = "z-ai/glm-5.2"
+effort = "low"                       # testing default; raise for real runs
+max_tokens = 16384                   # honored by openrouter; reasoning tokens
+                                     # count against it, so leave real headroom
+
+# Alternative: same task on Grok 4.5 (swap in for the table above).
+# [tasks.forecast_pass]
+# provider = "openrouter"
+# model = "x-ai/grok-4.5"
+# effort = "low"
+# max_tokens = 4096
+
+# Alternative: the Claude subscription via the Claude Code CLI (previous default).
+# [tasks.forecast_pass]
+# provider = "claude-cli"
+# model = "claude-sonnet-5"
+# effort = "low"
+# max_tokens = 4096
+
+# Query generation for the research/retrieval stack: one cheap LLM call that
+# turns a question into 2–4 web-search queries (one aimed at its resolution
+# source). Kept small and low-effort — it is a routing step, not the forecast.
+[tasks.query_gen]
+provider = "claude-cli"
+model = "claude-sonnet-5"
+effort = "low"
+max_tokens = 1024
+
+# Alternative: run the same task on the Codex subscription instead. Swap the
+# [tasks.forecast_pass] table above for this one (only one may be active).
+# Codex constrains its output to the forecast JSON Schema via --output-schema.
+# NOTE (2026-07-09): do NOT leave model = "" for codex-cli right now — the CLI
+# default inherits the owner's global ~/.codex/config.toml model ("gpt-5.6-sol"),
+# which current CLI versions refuse to run. "gpt-5.5" is verified accepted on
+# the ChatGPT-account plan. Pricing is optional and cost is notional under the
+# subscription, so no [pricing.*] entry is required.
+# [tasks.forecast_pass]
+# provider = "codex-cli"
+# model = "gpt-5.5"
+# effort = "low"
+# max_tokens = 4096
+
+# Alternative: run the same task through OpenRouter (a plain HTTPS API, not a
+# CLI). Swap the active [tasks.forecast_pass] table for this one. Requires
+# OPENROUTER_API_KEY in engine/.env. Unlike the CLIs: 'model' is required (there
+# is NO default model — OpenRouter routes by explicit id), 'max_tokens' is
+# honored, effort maps to OpenRouter's reasoning param, and json_schema maps to
+# structured-output response_format (models that don't support it fall back to
+# prompt-JSON automatically). The logged cost is REAL dollars (usage.cost from
+# the API), and it draws down the Metaculus-donated tournament credits, which
+# arrive on an OpenRouter key. No [pricing.*] entry is needed — OpenRouter
+# reports the actual cost, so price_for is only a fallback.
+# [tasks.forecast_pass]
+# provider = "openrouter"
+# model = "openai/gpt-5.5"
+# effort = "low"
+# max_tokens = 4096
+
+# [pricing.<model>] — dollar cost per million tokens, used only to log spend.
+#   A model with no pricing table simply records cost as unknown (null). Under a
+#   subscription, pricing is optional and any logged cost is notional — it tracks
+#   quota draw, not dollars billed.
+
+[pricing.claude-sonnet-5]
+input_per_mtok = 3.0
+output_per_mtok = 15.0
+
+# [retrieval] — the research/retrieval stack (search + content extraction).
+#   All fields are optional; omitting the section (or any field) uses the
+#   defaults shown. Secrets (ASK_NEWS_API_KEY, TAVILY_API_KEY, optional
+#   JINA_API_KEY) live in engine/.env, never here.
+#
+#   news_provider              : search client for the news role ("asknews").
+#   general_provider           : search client for the general-web role ("tavily").
+#   max_results                : results requested per search call.
+#   max_fetches_per_question   : cap on content fetches per forecast question.
+#   asknews_monthly_credit_cap : hard monthly AskNews credit cap; the client
+#                                refuses to call once exceeding it. 900 leaves
+#                                headroom under the 1,000-credit free tier.
+#   extract_min_chars          : quality gate — shorter extracted text = failure.
+#   extract_min_words          : quality gate — fewer words than this = failure.
+#   max_doc_chars              : cap on extracted-doc text stored in a research
+#                                bundle and handed to the prompt (keeps records
+#                                reviewable); longer bodies are truncated.
+#   timeout_seconds            : per-request HTTP timeout (search + extraction).
+#   reuse_research_max_age_hours : how many hours a cached research bundle stays
+#                                reusable by the `forecast` command, so a failed
+#                                pass does not throw away paid-for search credits.
+#                                0 disables reuse: always re-research.
+
+# [ensemble] — candidate B: N diverse forecasting passes over one shared research
+#   bundle, pooled in log-odds space. All fields are optional; omitting the
+#   section (or any field) uses the defaults shown here in code.
+#
+#   extremization_mode         : "fixed" applies extremization_coefficient
+#                                directly; "agreement" derives the coefficient
+#                                from how much the members agree (tighter spread
+#                                => more extremization).
+#   extremization_coefficient  : coefficient used in "fixed" mode (1.0 = none).
+#   agreement_min_coefficient  : coefficient at maximum member disagreement
+#                                ("agreement" mode).
+#   agreement_max_coefficient  : coefficient at full member agreement
+#                                ("agreement" mode).
+#   confidence_high_max_spread : member spread (std dev of log-odds) at/below
+#                                which the ensemble reports "high" confidence.
+#   confidence_low_min_spread  : member spread at/above which it reports "low"
+#                                ("medium" between the two thresholds).
+#
+#   [[ensemble.members]] tables define the roster (frame + model). When present
+#   they REPLACE the default roster entirely; when absent the built-in default
+#   set is used (3 frames on GLM-5.2 + outside-first on Grok-4.5 and Claude).
+#   Each member: frame (one of "outside-first" | "inside-first" | "status-quo"),
+#   plus the same model fields as a [tasks.*] table (provider/model/effort/
+#   max_tokens).
+
+[ensemble]
+extremization_mode = "agreement"     # EXPERIMENT 001 registered value ("fixed" is the shipped default)
+extremization_coefficient = 1.0
+agreement_min_coefficient = 1.0
+agreement_max_coefficient = 1.3
+confidence_high_max_spread = 0.4     # spread thresholds on member log-odds std dev
+confidence_low_min_spread = 1.2
+
+[[ensemble.members]]
+frame = "outside-first"
+provider = "openrouter"
+model = "z-ai/glm-5.2"
+effort = "low"
+max_tokens = 16384
+
+[[ensemble.members]]
+frame = "inside-first"
+provider = "openrouter"
+model = "z-ai/glm-5.2"
+effort = "low"
+max_tokens = 16384
+
+[[ensemble.members]]
+frame = "status-quo"
+provider = "openrouter"
+model = "z-ai/glm-5.2"
+effort = "low"
+max_tokens = 16384
+
+[[ensemble.members]]
+frame = "outside-first"
+provider = "openrouter"
+model = "x-ai/grok-4.5"
+effort = "low"
+max_tokens = 16384
+
+[[ensemble.members]]
+frame = "outside-first"
+provider = "claude-cli"
+model = "claude-sonnet-5"
+effort = "low"
+max_tokens = 4096
+
+# Frontier member (owner request at E1, 2026-07-10): one high-end model from a
+# lab not otherwise on the roster. gpt-5.6-terra = current OpenAI flagship tier
+# on OpenRouter ($2.50/$15 per Mtok; the -pro/-sol variants cost 2-12x more).
+[[ensemble.members]]
+frame = "outside-first"
+provider = "openrouter"
+model = "openai/gpt-5.6-terra"
+effort = "low"
+max_tokens = 16384
+
+[retrieval]
+news_provider = "asknews"
+general_provider = "tavily"
+max_results = 5
+max_fetches_per_question = 8
+asknews_monthly_credit_cap = 900
+extract_min_chars = 500
+extract_min_words = 80
+max_doc_chars = 8000
+timeout_seconds = 20.0
+reuse_research_max_age_hours = 6.0

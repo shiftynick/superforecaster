@@ -1,16 +1,25 @@
 # 001 — Candidate B ensemble vs. candidate A baseline (forward, frozen-context)
 
-- Status: draft (awaiting owner sign-off to freeze — checkpoint E1 / C3)
+- Status: **frozen** (running)
 - Registered: 2026-07-09
-- Frozen: —
-- Owner sign-off: —
+- Frozen: 2026-07-10
+- Owner sign-off: 2026-07-10 ("The rest is good" — with one pre-freeze amendment: add a
+  frontier member from a lab not already on the roster). Second pre-freeze amendment by
+  agent: selection window widened 30 → 60 days — the snapshot store held only 8 open
+  binary questions resolving within 30 days (N far below target); 60 days yields 51
+  eligible. Both amendments made before any arm ran.
 
 ## Hypothesis
 
-The candidate-B ensemble (5 members: 3 reasoning frames on GLM-5.2 + outside-first on
-Grok-4.5 and claude-sonnet-5; log-odds pool; agreement-scaled extremization 1.0–1.3)
-achieves a lower mean Brier score than candidate A (single outside-first GLM-5.2 pass)
-on the same questions with the same research bundles.
+The candidate-B ensemble (6 members: 3 reasoning frames on GLM-5.2 + outside-first on
+Grok-4.5, claude-sonnet-5, and openai/gpt-5.6-terra; log-odds pool; agreement-scaled
+extremization 1.0–1.3) achieves a lower mean Brier score than candidate A (single
+outside-first GLM-5.2 pass) on the same questions with the same research bundles.
+
+Owner FYI at freeze: candidates C, D, E are expected to be built during this experiment's
+resolution window; each gets its own pre-registered experiment (they may reuse this
+question set and cached research bundles where windows overlap) — this experiment stays
+A-vs-B only.
 
 ## Arms
 
@@ -24,14 +33,17 @@ research bundle per question (identical evidence; the architecture is the only v
 
 ## Question set
 
-- Selection rule (to freeze): all open binary questions in the snapshot store with
-  `scheduled_resolve_time` within 30 days of the freeze date, capped at the first N by
-  soonest resolve time, where N is set by the budget below (target N ≥ 40 for a first
-  directional read; a confirmatory run needs hundreds — see power check).
+- Selection rule (frozen 2026-07-10): all open binary questions in the snapshot store with
+  `scheduled_resolve_time` within **60 days** of the freeze date (amended from 30 — see
+  status note), capped at the first N = 40 by soonest resolve time.
 - Leakage tier: **frozen-context forward** (docs/02's strongest tier) — forecasts are made
   before resolution with the research bundle frozen into each record; leakage-impossible
   by construction.
-- Question ids: *(appended at freeze time)*.
+- Question ids (40, pinned 2026-07-10, soonest-resolving first):
+  43937, 40795, 43716, 43612, 43507, 44373, 43892, 44422, 43873, 44011,
+  44017, 44256, 35710, 44139, 43852, 44248, 43854, 39432, 43522, 43506,
+  44250, 43737, 43432, 44014, 43738, 44634, 44423, 44406, 43908, 43882,
+  43870, 43732, 43503, 43430, 43510, 43360, 44547, 44415, 44253, 44241.
 
 ## Metric & decision rule
 

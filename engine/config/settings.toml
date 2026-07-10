@@ -200,6 +200,16 @@ model = "claude-sonnet-5"
 effort = "low"
 max_tokens = 4096
 
+# Frontier member (owner request at E1, 2026-07-10): one high-end model from a
+# lab not otherwise on the roster. gpt-5.6-terra = current OpenAI flagship tier
+# on OpenRouter ($2.50/$15 per Mtok; the -pro/-sol variants cost 2-12x more).
+[[ensemble.members]]
+frame = "outside-first"
+provider = "openrouter"
+model = "openai/gpt-5.6-terra"
+effort = "low"
+max_tokens = 16384
+
 [retrieval]
 news_provider = "asknews"
 general_provider = "tavily"
