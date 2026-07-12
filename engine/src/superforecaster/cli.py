@@ -14,6 +14,7 @@ The Metaculus API token comes from the ``METACULUS_TOKEN`` environment variable
 
 from __future__ import annotations
 
+import contextlib
 import os
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -24,9 +25,11 @@ import typer
 
 from .config import (
     EnsembleSettings,
+    PyramidSettings,
     RetrievalSettings,
     TaskModelConfig,
     load_ensemble_settings,
+    load_pyramid_settings,
     load_retrieval_settings,
     load_settings,
     load_task_config,
@@ -46,6 +49,8 @@ from .forecaster import ForecastRecord, run_forecast_pass
 from .llm import LlmClient, LlmError, build_llm_client, check_provider_cli
 from .metaculus import MetaculusClient
 from .models import QuestionSnapshot, SkipPost
+from .pyramid_runner import run_pyramid_forecast
+from .render import render_forecast_html
 from .research import ResearchBundle, run_research
 from .research_cache import ResearchCache
 from .search import SearchClient, build_search_client, read_asknews_credits_used
@@ -184,6 +189,17 @@ def _build_member_client_factory() -> Callable[[TaskModelConfig], LlmClient]:
     Defaults to :func:`build_llm_client` (dispatches on the member's provider).
     Tests monkeypatch this to inject a fake factory that hands out canned clients
     per member, mirroring :func:`_build_llm_client` for the single pass.
+    """
+    return build_llm_client
+
+
+# Seam for tests: monkeypatched to inject a fake pyramid client factory.
+def _build_pyramid_client_factory() -> Callable[[TaskModelConfig], LlmClient]:
+    """Return the factory the pyramid runner uses to build each task's LLM client.
+
+    Defaults to :func:`build_llm_client` (dispatches on each task's provider, so
+    the decompose / leaf / holistic tasks can each name their own model). Tests
+    monkeypatch this to hand out canned clients keyed by the task config.
     """
     return build_llm_client
 
@@ -413,6 +429,16 @@ def forecast(
             "--no-research."
         ),
     ),
+    pyramid: bool = typer.Option(
+        False,
+        "--pyramid",
+        help=(
+            "Run the decomposition pyramid (candidate C): decompose the question "
+            "into a tree, estimate its leaves, combine upward, blend with a "
+            "holistic pass. Mutually exclusive with --ensemble. Composes with "
+            "--no-research."
+        ),
+    ),
     data_dir: Path | None = _DataDirOption,
     forecast_dir: Path | None = _ForecastDirOption,
     post_id: list[int] = _PostIdOption,
@@ -423,13 +449,24 @@ def forecast(
     content extraction) into a frozen bundle that is rendered into the prompt and
     stored with the forecast. ``--no-research`` forecasts blind, preserving the
     baseline for side-by-side comparison. ``--ensemble`` swaps the single pass for
-    the diverse ensemble, storing every member record plus the pooled result. All
-    forecasts are dry runs — nothing is submitted. Per-question LLM cost and
-    search-credit draw are both logged.
+    the diverse ensemble; ``--pyramid`` swaps it for the decomposition pyramid
+    (the two are mutually exclusive). All forecasts are dry runs — nothing is
+    submitted. Per-question LLM cost and search-credit draw are both logged.
     """
+    if ensemble and pyramid:
+        typer.echo(
+            "forecast: --ensemble and --pyramid are mutually exclusive; pick one method.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
     ensemble_settings = load_ensemble_settings() if ensemble else None
+    pyramid_settings = load_pyramid_settings() if pyramid else None
+    pyramid_ensemble_settings = load_ensemble_settings() if pyramid else None
     if ensemble_settings is not None:
         _require_llm_cli([m.task_config() for m in ensemble_settings.members])
+    elif pyramid_settings is not None:
+        _require_llm_cli(_pyramid_task_configs())
     else:
         _require_llm_cli()
     snap_dir = _resolve_data_dir(data_dir)
@@ -449,10 +486,12 @@ def forecast(
         return
 
     # The single pass needs the forecast-pass config + one client; the ensemble
-    # drives members from its own roster via the member factory instead.
-    config = None if ensemble else load_task_config("forecast_pass")
-    client = None if ensemble else _build_llm_client()
+    # and pyramid drive their own task configs via a per-task client factory.
+    single_pass = not ensemble and not pyramid
+    config = load_task_config("forecast_pass") if single_pass else None
+    client = _build_llm_client() if single_pass else None
     member_factory = _build_member_client_factory() if ensemble else None
+    pyramid_factory = _build_pyramid_client_factory() if pyramid else None
 
     # Research context. Built once and reused across questions; the quota counter
     # lives in the data root (the parent of the snapshot dir), config-derived so
@@ -481,6 +520,24 @@ def forecast(
                 bundle, research_state = _research_for_question(
                     snapshot, research_ctx, cache, now=now
                 )
+
+            if pyramid_settings is not None:
+                assert pyramid_factory is not None  # set whenever pyramid is on
+                record = _forecast_pyramid_question(
+                    snapshot,
+                    pyramid_settings,
+                    pyramid_ensemble_settings,
+                    pyramid_factory,
+                    bundle,
+                    research_state,
+                    now=now,
+                    to_store=to_store,
+                    failures=failures,
+                )
+                if record is not None:
+                    summaries.append(record)
+                fc_store.append(to_store)
+                continue
 
             if ensemble_settings is not None:
                 assert member_factory is not None  # set whenever ensemble is on
@@ -521,7 +578,12 @@ def forecast(
             research_ctx.close()
     total_cost = sum(r.cost_usd for r in summaries if r.cost_usd is not None)
     total_credits = sum(r.research_search_credits for r in summaries)
-    mode = "ensemble" if ensemble else ("blind" if no_research else "researched")
+    if ensemble:
+        mode = "ensemble"
+    elif pyramid:
+        mode = "pyramid"
+    else:
+        mode = "blind" if no_research else "researched"
     typer.echo(
         f"forecast ({mode}): n={len(summaries)} failed={len(failures)} "
         f"total_cost=${total_cost:.4f} search_credits={total_credits} (all dry-run)"
@@ -584,6 +646,65 @@ def _forecast_ensemble_question(
     return pooled
 
 
+def _pyramid_task_configs() -> list[TaskModelConfig]:
+    """The distinct task configs a pyramid run drives, for the provider readiness check.
+
+    Decompose, leaf (``forecast_pass``), and holistic (``holistic`` if configured,
+    else it reuses ``forecast_pass``). ``_require_llm_cli`` dedupes by provider, so
+    listing all three is safe even when they share one.
+    """
+    configs = [load_task_config("decompose"), load_task_config("forecast_pass")]
+    # holistic falls back to forecast_pass (already listed) when its table is absent.
+    with contextlib.suppress(KeyError):
+        configs.append(load_task_config("holistic"))
+    return configs
+
+
+def _forecast_pyramid_question(
+    snapshot: QuestionSnapshot,
+    settings: PyramidSettings,
+    ensemble_settings: EnsembleSettings | None,
+    client_factory: Callable[[TaskModelConfig], LlmClient],
+    bundle: ResearchBundle | None,
+    research_state: str,
+    *,
+    now: datetime,
+    to_store: list[ForecastRecord],
+    failures: list[str],
+) -> ForecastRecord | None:
+    """Run the pyramid for one question; append its single record to the store.
+
+    Returns the record (for the run's cost/credit totals), or ``None`` when the
+    pyramid raised for this question — a failure is isolated to its question like
+    the ensemble and single-pass paths. The runner itself degrades model failures
+    internally, so a raise here is unusual (e.g. a config problem); it is logged
+    and the loop moves on. A cached bundle's credits are zeroed on the record so a
+    reused bundle is never double-counted.
+    """
+    try:
+        record = run_pyramid_forecast(
+            snapshot,
+            settings=settings,
+            ensemble_settings=ensemble_settings,
+            research=bundle,
+            client_factory=client_factory,
+            now=now,
+        )
+    except LlmError as exc:
+        failures.append(f"q{snapshot.question_id}: {exc}")
+        typer.echo(
+            f"q{snapshot.question_id} (post {snapshot.post_id}): pyramid FAILED ({exc})",
+            err=True,
+        )
+        return None
+
+    if research_state == "cached":
+        record = record.model_copy(update={"research_search_credits": 0})
+    to_store.append(record)
+    _echo_pyramid_summary(record, research_state)
+    return record
+
+
 def _research_for_question(
     snapshot: QuestionSnapshot,
     research_ctx: _ResearchContext,
@@ -642,6 +763,22 @@ def _echo_ensemble_summary(
         f"q{pooled.question_id} (post {pooled.post_id}): "
         f"p={pooled.probability:.2f} confidence={pooled.confidence} "
         f"spread={result.spread:.2f} members={n_ok}ok/{n_failed}failed "
+        f"cost={cost} research={research_state}"
+    )
+
+
+def _echo_pyramid_summary(record: ForecastRecord, research_state: str) -> None:
+    """Print one per-question pyramid result line (pooled/structural/holistic, etc.)."""
+    cost = "n/a" if record.cost_usd is None else f"${record.cost_usd:.4f}"
+    detail = record.pyramid
+    if detail is None:  # defensive: a pyramid record always carries its detail
+        typer.echo(f"q{record.question_id} (post {record.post_id}): p={record.probability:.2f}")
+        return
+    typer.echo(
+        f"q{record.question_id} (post {record.post_id}): "
+        f"p={record.probability:.2f} structural={detail.structural_probability:.2f} "
+        f"holistic={detail.holistic_probability:.2f} confidence={record.confidence} "
+        f"leaves={len(detail.leaf_estimates)} pruned={len(detail.prune_notes)} "
         f"cost={cost} research={research_state}"
     )
 
@@ -957,6 +1094,45 @@ def experiment_status(
         resolutions = resolutions_from_store(latest, manifest.question_ids)
         status = compute_status(manifest, records, resolutions)
         _echo_experiment_status(status)
+
+
+_RenderOutOption = typer.Option(
+    None,
+    "--out",
+    help="Output HTML path. Defaults to docs/reviews/forecast-<question_id>.html.",
+)
+_RenderQuestionIdArgument = typer.Argument(
+    ..., help="The question id whose latest forecast to render."
+)
+
+
+@app.command("render-forecast")
+def render_forecast(
+    question_id: int = _RenderQuestionIdArgument,
+    out: Path | None = _RenderOutOption,
+    forecast_dir: Path | None = _ForecastDirOption,
+) -> None:
+    """Render the latest stored forecast for a question into a self-contained HTML page.
+
+    Reads every stored record, picks the most recent one for ``question_id``, and
+    writes a deterministic, no-LLM argument view (the decomposition tree for a
+    pyramid record; a graceful-degrade view for any other method). Prints the
+    path it wrote.
+    """
+    fc_store = ForecastStore(_resolve_forecast_dir(forecast_dir))
+    matching = [r for r in fc_store.iter_all() if r.question_id == question_id]
+    if not matching:
+        typer.echo(f"render-forecast: no stored forecast for question {question_id}.", err=True)
+        raise typer.Exit(code=1)
+
+    # The latest record for this question (records are appended over time).
+    record = max(matching, key=lambda r: r.created_at)
+    html = render_forecast_html(record)
+
+    out_path = out if out is not None else Path("docs/reviews") / f"forecast-{question_id}.html"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(html, encoding="utf-8")
+    typer.echo(f"render-forecast: wrote {out_path}")
 
 
 if __name__ == "__main__":  # pragma: no cover

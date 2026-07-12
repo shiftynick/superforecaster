@@ -39,6 +39,7 @@ from pydantic import BaseModel, Field, ValidationError
 from .config import TaskModelConfig, load_task_config, price_for
 from .llm import LlmClient, LlmError, LlmResult, build_llm_client
 from .models import QuestionSnapshot
+from .pyramid import CombinationStep, Grounding, PruneNote, PyramidNode
 from .research import ResearchBundle
 
 Confidence = Literal["low", "medium", "high"]
@@ -99,6 +100,88 @@ class EnsembleDetail(BaseModel):
     member_failures: list[str]
 
 
+class LeafEstimate(BaseModel):
+    """One bedrock leaf's estimate inside a decomposition-pyramid forecast.
+
+    Candidate C (``pyramid_runner.py``) estimates each leaf sub-question with the
+    same :func:`run_forecast_pass` machinery, then combines the leaves upward. This
+    object is the per-leaf slice of that trace — enough to re-read the argument
+    without reassembling the (unstored) member records by hand.
+
+    Attributes:
+        node_id: The leaf node's id (the key it is combined by).
+        question: The leaf sub-question, in plain words.
+        grounding: ``"model-knowledge"`` (answered without the bundle) or
+            ``"evidence"`` (grounded in the shared research bundle).
+        probability: The leaf's estimated probability of YES.
+        confidence: The leaf's own confidence in that estimate.
+        rationale: The leaf's legible argument.
+        reference_class: The outside-view anchor (base-rate class) the leaf named.
+        failed: ``True`` when the leaf's own LLM pass failed after its retry and
+            this is the degraded fallback (probability ``0.5``, confidence
+            ``"low"``) rather than a real estimate.
+    """
+
+    node_id: str
+    question: str
+    grounding: Grounding
+    probability: float
+    confidence: Confidence
+    rationale: str
+    reference_class: str
+    failed: bool = False
+
+
+class PyramidDetail(BaseModel):
+    """Postmortem detail carried by a *pyramid-c* forecast record.
+
+    Candidate C decomposes a question into a tree, estimates its bedrock leaves,
+    combines them upward into a *structural* probability, runs one *holistic*
+    direct forecast alongside, and blends the two. This object stores the whole
+    legible argument graph on the single stored :class:`ForecastRecord` so a
+    postmortem — or the ``render-forecast`` view — can replay exactly what was
+    thought, combined, and blended.
+
+    Defined here (rather than in ``pyramid_runner.py``) for the same reason as
+    :class:`EnsembleDetail`: ``pyramid_runner`` imports this module, so the record
+    must reference the detail type without an import cycle. The pure tree/step/note
+    shapes it composes live in ``pyramid.py`` (which imports neither).
+
+    Attributes:
+        tree: The decomposition tree (nodes, grounding labels, reasoning types).
+        prune_notes: One note per structural-cap cut the parser made (never a
+            silent truncation).
+        leaf_estimates: Every leaf's :class:`LeafEstimate`, in tree order.
+        combination_steps: The per-node combination math, in tree order — the
+            inputs (raw and clipped) and output for each node.
+        structural_probability: The pyramid's combined (pre-blend) probability.
+        holistic_probability: The direct one-shot forecast of the root question.
+        holistic_blend_weight: The weight placed on the holistic estimate when
+            blending it with the structural one (``blended`` is on the record's
+            ``raw_probability``/``probability``).
+        weakest_leaf_confidence: Confidence signal (a) — the weakest leaf
+            confidence on any multiplied path (stored raw; see the spec §4).
+        structural_holistic_gap: Confidence signal (b) — the absolute log-odds gap
+            between the structural and holistic estimates (stored raw).
+        decompose_failed: ``True`` when decomposition failed after its retry and
+            the tree degraded to a single careful leaf.
+        notes: Free-form trace notes (decompose fallback, failed leaves, a failed
+            holistic pass) — the honest record of every degrade that happened.
+    """
+
+    tree: PyramidNode
+    prune_notes: list[PruneNote]
+    leaf_estimates: list[LeafEstimate]
+    combination_steps: list[CombinationStep]
+    structural_probability: float
+    holistic_probability: float
+    holistic_blend_weight: float
+    weakest_leaf_confidence: Confidence
+    structural_holistic_gap: float
+    decompose_failed: bool
+    notes: list[str]
+
+
 class ForecastRecord(BaseModel):
     """One stored forecast: the answer plus everything needed to audit it.
 
@@ -141,6 +224,12 @@ class ForecastRecord(BaseModel):
     method: str = "checklist-a"
     frame: str | None = None
     ensemble: EnsembleDetail | None = None
+    # Candidate C bookkeeping. ``pyramid`` carries the decomposition-pyramid
+    # postmortem detail (the tree, leaf estimates, combination math, structural/
+    # holistic/blend, and the two raw confidence signals) and is set ONLY on a
+    # ``method="pyramid-c"`` record. It defaults to ``None`` so every other
+    # method's records (and pre-pyramid JSONL lines) still parse unchanged.
+    pyramid: PyramidDetail | None = None
 
 
 # ``{today}`` is filled in per call so the model knows the current date without

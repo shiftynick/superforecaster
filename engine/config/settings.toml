@@ -70,6 +70,28 @@ model = "claude-sonnet-5"
 effort = "low"
 max_tokens = 1024
 
+# Decomposition for candidate C (the pyramid): one LLM call that breaks a
+# question into a typed sub-question tree. This step sets the shape of the whole
+# argument, so it runs a STRONGER model than the cheap leaf passes — a bad
+# decomposition cannot be repaired downstream. max_tokens leaves room for the
+# reasoning-then-JSON tree the decomposer emits.
+[tasks.decompose]
+provider = "openrouter"
+model = "openai/gpt-5.6-terra"
+effort = "low"
+max_tokens = 16384
+
+# Holistic sanity check for candidate C: one direct forecast of the ROOT
+# question, blended against the structural (leaf-combined) estimate so the
+# structure never stands alone. Same model as the leaf passes (forecast_pass) —
+# it is a peer check, not the decomposition. If this table is omitted the pyramid
+# falls back to [tasks.forecast_pass] automatically.
+[tasks.holistic]
+provider = "openrouter"
+model = "z-ai/glm-5.2"
+effort = "low"
+max_tokens = 16384
+
 # Alternative: run the same task on the Codex subscription instead. Swap the
 # [tasks.forecast_pass] table above for this one (only one may be active).
 # Codex constrains its output to the forecast JSON Schema via --output-schema.
@@ -209,6 +231,44 @@ provider = "openrouter"
 model = "openai/gpt-5.6-terra"
 effort = "low"
 max_tokens = 16384
+
+# [pyramid] — candidate C: decompose the question into a typed tree, estimate its
+#   bedrock leaves, combine them upward into a "structural" probability, run one
+#   "holistic" direct forecast alongside, and blend the two. All fields are
+#   optional; omitting the section (or any field) uses the defaults shown here,
+#   which match the code defaults on PyramidSettings. The decompose / leaf /
+#   holistic MODELS live in [tasks.decompose] / [tasks.forecast_pass] /
+#   [tasks.holistic] above — this section is only the structural + blend knobs.
+#
+#   max_depth             : deepest tree level (root is depth 0). An internal node
+#                           at/beyond this depth is pruned to a leaf. Default 2 —
+#                           a TESTING default; expect to raise it for real runs
+#                           once the vertical slice shows the failure modes.
+#   max_children          : most children any internal node may keep; the overflow
+#                           is dropped (with a prune note). Default 4.
+#   max_conjuncts         : most multiplied children a conjunction/conditional may
+#                           keep — the guard against conjunctive error compounding
+#                           (multiplying several uncertain sub-events overshoots
+#                           toward 0). Default 3.
+#   leaf_clip_low         : lower bound each child probability is clipped to before
+#                           it is multiplied (blunts near-certain children). 0.03.
+#   leaf_clip_high        : upper bound for the same clip. Default 0.97.
+#   holistic_blend_weight : weight placed on the holistic estimate when blending it
+#                           with the structural one in log-odds space. Default 0.5
+#                           — the honest prior that we do not yet know which side
+#                           to trust; the experiment will tell us.
+#   combination_mode      : how internal nodes combine children. "guarded-product"
+#                           (v1, transparent + property-tested) or the reserved
+#                           "llm-synthesis" (a v2 hypothesis; not yet implemented).
+#
+# [pyramid]
+# max_depth = 2
+# max_children = 4
+# max_conjuncts = 3
+# leaf_clip_low = 0.03
+# leaf_clip_high = 0.97
+# holistic_blend_weight = 0.5
+# combination_mode = "guarded-product"
 
 [retrieval]
 news_provider = "asknews"

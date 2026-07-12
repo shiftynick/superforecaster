@@ -803,6 +803,181 @@ def test_forecast_ensemble_checks_each_distinct_provider(
     assert "OPENROUTER_API_KEY" in result.output
 
 
+_PYRAMID_TASKS_TOML = (
+    '[tasks.decompose]\nprovider = "claude-cli"\nmodel = "d"\nmax_tokens = 100\n\n'
+    '[tasks.forecast_pass]\nprovider = "claude-cli"\nmodel = "leaf"\nmax_tokens = 100\n\n'
+    '[tasks.holistic]\nprovider = "claude-cli"\nmodel = "hol"\nmax_tokens = 100\n'
+)
+
+_PYRAMID_TREE_JSON = (
+    "Decomposition.\n```json\n"
+    '{"id": "root", "question": "Root?", "node_type": "conjunction", "children": ['
+    '{"id": "a", "question": "Step A?", "node_type": "leaf", "grounding": "evidence"}, '
+    '{"id": "b", "question": "Base rate?", "node_type": "leaf", "grounding": "model-knowledge"}]}'
+    "\n```"
+)
+
+
+class _FakeTaskLlm:
+    """Serves scripted replies in order; used to script a pyramid run's tasks."""
+
+    def __init__(self, replies: list[str]) -> None:
+        self._replies = list(replies)
+
+    def run(
+        self,
+        system: str,
+        prompt: str,
+        model: str,
+        max_tokens: int | None = None,
+        json_schema: dict[str, object] | None = None,
+        effort: str | None = None,
+    ) -> LlmResult:
+        text = self._replies.pop(0)
+        return LlmResult(
+            text=text,
+            input_tokens=100,
+            output_tokens=50,
+            cost_usd=0.01,
+            stop_reason="end_turn",
+            model=model,
+        )
+
+
+def _pin_pyramid_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    config = tmp_path / "settings.toml"
+    config.write_text(_PYRAMID_TASKS_TOML, encoding="utf-8")
+    monkeypatch.setenv("SUPERFORECASTER_CONFIG", str(config))
+
+
+def test_forecast_pyramid_and_ensemble_are_mutually_exclusive(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    result = runner.invoke(
+        cli.app,
+        ["forecast", "--pyramid", "--ensemble", "--data-dir", str(tmp_path)],
+    )
+    assert result.exit_code == 1
+    assert "mutually exclusive" in result.output
+
+
+def test_forecast_pyramid_happy_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    snap_dir = tmp_path / "snapshots"
+    fc_dir = tmp_path / "forecasts"
+    _pin_pyramid_config(monkeypatch, tmp_path)
+    _seed_open_question(monkeypatch, snap_dir)
+
+    leaf_json = (
+        "Reasoning.\n```json\n"
+        '{"probability": 0.5, "confidence": "medium", "rationale": "r", '
+        '"reference_class": "c"}\n```'
+    )
+    clients = {
+        "d": _FakeTaskLlm([_PYRAMID_TREE_JSON]),
+        "leaf": _FakeTaskLlm([leaf_json, leaf_json]),  # two leaves
+        "hol": _FakeTaskLlm([leaf_json]),
+    }
+
+    def _factory() -> Any:
+        def factory(config: Any) -> _FakeTaskLlm:
+            return clients[config.model]
+
+        return factory
+
+    monkeypatch.setattr(cli, "_build_pyramid_client_factory", _factory)
+    _pass_cli_check(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "forecast",
+            "--pyramid",
+            "--no-research",
+            "--data-dir",
+            str(snap_dir),
+            "--forecast-dir",
+            str(fc_dir),
+            "--closing-within-days",
+            "365",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "pyramid" in result.output
+    assert "structural=" in result.output
+    assert "holistic=" in result.output
+    assert "leaves=2" in result.output
+    assert "n=1" in result.output
+
+    from superforecaster.forecast_store import ForecastStore
+
+    stored = list(ForecastStore(fc_dir).iter_all())
+    assert len(stored) == 1  # ONE record per pyramid question
+    (rec,) = stored
+    assert rec.method == "pyramid-c"
+    assert rec.pyramid is not None
+    assert len(rec.pyramid.leaf_estimates) == 2
+    # Decompose + 2 leaves + holistic = 4 calls x $0.01.
+    assert rec.cost_usd == pytest.approx(0.04)
+
+
+def test_render_forecast_command_writes_html(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from datetime import UTC, datetime
+
+    from superforecaster.forecast_store import ForecastStore
+    from superforecaster.forecaster import ForecastRecord
+
+    fc_dir = tmp_path / "forecasts"
+    record = ForecastRecord(
+        created_at=datetime(2026, 7, 12, tzinfo=UTC),
+        question_id=555,
+        post_id=666,
+        title="Will the CLI render this?",
+        probability=0.42,
+        raw_probability=0.42,
+        confidence="medium",
+        rationale="A checklist rationale.",
+        reference_class="rendered questions",
+        model="z-ai/glm-5.2",
+        input_tokens=100,
+        output_tokens=50,
+        cost_usd=0.01,
+        method="checklist-a",
+    )
+    ForecastStore(fc_dir).append([record])
+
+    out = tmp_path / "out.html"
+    result = runner.invoke(
+        cli.app,
+        [
+            "render-forecast",
+            "555",
+            "--forecast-dir",
+            str(fc_dir),
+            "--out",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert str(out) in result.output
+    html = out.read_text(encoding="utf-8")
+    assert html.startswith("<!doctype html>")
+    assert "Will the CLI render this?" in html
+    assert "42%" in html
+
+
+def test_render_forecast_missing_question_exits(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    result = runner.invoke(
+        cli.app,
+        ["render-forecast", "12345", "--forecast-dir", str(tmp_path / "empty")],
+    )
+    assert result.exit_code == 1
+    assert "no stored forecast" in result.output
+
+
 def test_data_dir_comes_from_settings_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """With no --data-dir flag or env, the snapshot dir comes from settings.toml."""
     snap_dir = tmp_path / "from-settings"
