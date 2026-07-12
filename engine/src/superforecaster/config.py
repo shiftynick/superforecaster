@@ -41,6 +41,9 @@ _VALID_EFFORTS: frozenset[str] = frozenset({"low", "medium", "high"})
 ExtremizationMode = Literal["fixed", "agreement"]
 _VALID_EXTREMIZATION_MODES: frozenset[str] = frozenset({"fixed", "agreement"})
 
+CombinationMode = Literal["guarded-product", "llm-synthesis"]
+_VALID_COMBINATION_MODES: frozenset[str] = frozenset({"guarded-product", "llm-synthesis"})
+
 # Built-in fallbacks used when a section (or the whole file) is absent. These are
 # the last link in the settings precedence chain and keep a minimal config valid.
 _DEFAULT_SNAPSHOT_DIR = "./data/snapshots"
@@ -146,6 +149,42 @@ class EnsembleSettings:
     confidence_high_max_spread: float = 0.4
     confidence_low_min_spread: float = 1.2
     members: tuple[EnsembleMemberConfig, ...] = _DEFAULT_ENSEMBLE_MEMBERS
+
+
+@dataclass(frozen=True)
+class PyramidSettings:
+    """Tunables for candidate C, the decomposition pyramid (``[pyramid]`` section).
+
+    Config-over-code: the pyramid parser and combination math read their
+    structural caps, clip bounds, blend weight, and combination mode from here
+    rather than hard-coding any of them. Every field is optional with the default
+    shown; a missing ``[pyramid]`` section uses all defaults.
+
+    Attributes:
+        max_depth: Deepest level the tree may reach (root is depth 0). An internal
+            node at or beyond this depth is pruned to a leaf. Default ``2`` — a
+            testing default; expect to raise it for real runs.
+        max_children: Most children any internal node may keep; the overflow is
+            dropped (pruned). Default ``4``.
+        max_conjuncts: Most multiplied conjuncts a ``conjunction`` node may keep —
+            the guard against conjunctive error compounding. Default ``3``.
+        leaf_clip_low: Lower bound each child probability is clipped to before it
+            is multiplied. Default ``0.03``.
+        leaf_clip_high: Upper bound for the same clip. Default ``0.97``.
+        holistic_blend_weight: Weight placed on the holistic (direct) forecast when
+            blending it with the structural estimate in log-odds space. Default
+            ``0.5`` — the honest prior that we do not yet know which to trust.
+        combination_mode: How internal nodes combine children. ``"guarded-product"``
+            (v1) or the reserved ``"llm-synthesis"``.
+    """
+
+    max_depth: int = 2
+    max_children: int = 4
+    max_conjuncts: int = 3
+    leaf_clip_low: float = 0.03
+    leaf_clip_high: float = 0.97
+    holistic_blend_weight: float = 0.5
+    combination_mode: CombinationMode = "guarded-product"
 
 
 @dataclass(frozen=True)
@@ -448,6 +487,49 @@ def load_ensemble_settings(path: Path | None = None) -> EnsembleSettings:
             table, "confidence_low_min_spread", d.confidence_low_min_spread
         ),
         members=members,
+    )
+
+
+def load_pyramid_settings(path: Path | None = None) -> PyramidSettings:
+    """Return the :class:`PyramidSettings` from the ``[pyramid]`` section.
+
+    Every field is optional: a missing ``[pyramid]`` table (or any missing field
+    within it) falls back to the built-in defaults on :class:`PyramidSettings`,
+    so a minimal config still loads. Follows :func:`load_ensemble_settings`'
+    pattern. The ``SUPERFORECASTER_CONFIG`` env override and default-path
+    resolution match :func:`load_settings`.
+
+    Args:
+        path: Optional explicit config path (defaults to the resolved location).
+
+    Raises:
+        ValueError: If ``combination_mode`` is present but not one of
+            ``guarded-product`` / ``llm-synthesis``.
+    """
+    table = _load_toml(path).get("pyramid")
+    d = PyramidSettings()  # defaults
+    if not isinstance(table, dict):
+        return d
+
+    mode_raw = table.get("combination_mode")
+    if mode_raw is None:
+        mode: CombinationMode = d.combination_mode
+    elif isinstance(mode_raw, str) and mode_raw in _VALID_COMBINATION_MODES:
+        mode = mode_raw  # type: ignore[assignment]
+    else:
+        raise ValueError(
+            "[pyramid] combination_mode must be one of guarded-product/llm-synthesis, "
+            f"got {mode_raw!r}"
+        )
+
+    return PyramidSettings(
+        max_depth=_int_field(table, "max_depth", d.max_depth),
+        max_children=_int_field(table, "max_children", d.max_children),
+        max_conjuncts=_int_field(table, "max_conjuncts", d.max_conjuncts),
+        leaf_clip_low=_float_field(table, "leaf_clip_low", d.leaf_clip_low),
+        leaf_clip_high=_float_field(table, "leaf_clip_high", d.leaf_clip_high),
+        holistic_blend_weight=_float_field(table, "holistic_blend_weight", d.holistic_blend_weight),
+        combination_mode=mode,
     )
 
 
