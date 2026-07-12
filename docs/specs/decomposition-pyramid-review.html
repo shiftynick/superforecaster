@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P0 Review — Candidate C: Decomposition Pyramid</title>
+<style>
+  :root {
+    --bg:#f6f7f9; --panel:#ffffff; --side:#18232b; --text:#1d2730; --muted:#63717d;
+    --line:#cfd8df; --blue:#1e6b96; --green:#35754b; --gold:#8a651d; --red:#a13f3f;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font:15px/1.55 "Segoe UI",system-ui,-apple-system,sans-serif; }
+  a { color:var(--blue); }
+  .wrap { display:flex; min-height:100vh; }
+  .side { width:270px; background:var(--side); color:#dce4ea; padding:20px 18px;
+    position:sticky; top:0; height:100vh; overflow-y:auto; flex-shrink:0; }
+  .side h1 { font-size:16px; margin:0 0 4px; color:#fff; }
+  .side .sub { font-size:12px; color:#9fb0bc; margin-bottom:16px; }
+  .side nav a { display:block; color:#c4d0d9; text-decoration:none; font-size:13px;
+    padding:5px 8px; border-radius:6px; margin-bottom:2px; }
+  .side nav a:hover { background:#243541; color:#fff; }
+  .side .actions { margin-top:18px; border-top:1px solid #2c3d4a; padding-top:14px; }
+  .side .actions button, .side .actions a.btn { display:block; width:100%; margin-bottom:8px;
+    background:#243541; color:#e4ecf2; border:1px solid #35495a; border-radius:6px;
+    padding:8px 10px; font-size:13px; cursor:pointer; text-align:left; text-decoration:none; }
+  .side .actions button:hover, .side .actions a.btn:hover { background:#2e4354; }
+  .side .actions button.primary { background:var(--blue); border-color:var(--blue); color:#fff; }
+  #exportStatus { font-size:12px; color:#9fb0bc; min-height:18px; }
+  .main { flex:1; padding:26px 34px 80px; max-width:960px; }
+  .crumb { font-size:12px; color:var(--muted); margin-bottom:6px; }
+  h2.page { font-size:22px; margin:0 0 6px; }
+  .lede { color:var(--muted); max-width:760px; margin-bottom:24px; }
+  section.unit { background:var(--panel); border:1px solid var(--line); border-radius:8px;
+    padding:20px 22px; margin-bottom:22px; }
+  section.unit h3 { margin:0 0 2px; font-size:17px; }
+  .purpose { font-size:13px; color:var(--muted); margin-bottom:12px; }
+  .body p { margin:10px 0; }
+  .body ul { margin:8px 0; padding-left:22px; }
+  .body li { margin:4px 0; }
+  .tag { display:inline-block; font-size:11px; font-weight:600; border-radius:5px;
+    padding:2px 8px; margin-right:6px; vertical-align:middle; }
+  .tag.decision { background:#e8f0f6; color:var(--blue); }
+  .tag.risk { background:#f7ecec; color:var(--red); }
+  .tag.context { background:#eef2ee; color:var(--green); }
+  .tag.plan { background:#f6f0e2; color:var(--gold); }
+  .gloss { border-bottom:1px dotted var(--muted); cursor:help; }
+  .prompts { background:#f2f6f9; border:1px solid #dbe5ec; border-radius:6px;
+    padding:10px 14px; margin:14px 0 4px; }
+  .prompts b { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--blue); }
+  .prompts ul { margin:6px 0 0; padding-left:20px; }
+  .prompts li { font-size:13.5px; margin:3px 0; }
+  .anno { border-top:1px dashed var(--line); margin-top:16px; padding-top:12px; }
+  .anno .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
+  .anno label { font-size:12.5px; color:var(--muted); }
+  .anno select { border:1px solid var(--line); border-radius:6px; padding:5px 8px;
+    font-size:13px; background:#fff; color:var(--text); }
+  .anno textarea { width:100%; min-height:64px; border:1px solid var(--line); border-radius:6px;
+    padding:8px 10px; font:13.5px/1.5 inherit; resize:vertical; color:var(--text); }
+  .anno .meta { display:flex; justify-content:space-between; align-items:center; margin-top:6px; }
+  .anno .saved { font-size:11.5px; color:var(--muted); }
+  .anno button.clear { background:none; border:1px solid var(--line); border-radius:6px;
+    color:var(--muted); font-size:12px; padding:4px 10px; cursor:pointer; }
+  .anno button.clear:hover { color:var(--red); border-color:var(--red); }
+  .example { background:#fbfcfd; border:1px solid var(--line); border-radius:8px;
+    padding:14px 16px; margin:12px 0; }
+  .example b.cap { display:block; font-size:12px; text-transform:uppercase;
+    letter-spacing:.04em; color:var(--muted); margin-bottom:8px; }
+  table.mini { border-collapse:collapse; font-size:13.5px; margin:8px 0; }
+  table.mini th, table.mini td { border:1px solid var(--line); padding:5px 10px; text-align:left; }
+  table.mini th { background:#f2f5f7; font-weight:600; }
+  code { background:#f0f3f5; border-radius:4px; padding:1px 5px; font-size:13px; }
+  dialog { border:1px solid var(--line); border-radius:8px; max-width:720px; width:90%; }
+  dialog textarea { width:100%; min-height:320px; font:12.5px/1.5 Consolas,monospace; }
+  @media (max-width:820px) {
+    .wrap { flex-direction:column; }
+    .side { width:100%; height:auto; position:static; }
+    .main { padding:18px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <aside class="side">
+    <h1>Candidate C — P0 Review</h1>
+    <div class="sub">Decomposition pyramid spec · full review mode · 2026-07-12</div>
+    <nav>
+      <a href="#u1">1 · Why C exists</a>
+      <a href="#u2">2 · The decomposition tree</a>
+      <a href="#u3">3 · Bedrock leaves</a>
+      <a href="#u4">4 · Error compounding &amp; guards</a>
+      <a href="#u5">5 · The 50/50 holistic blend</a>
+      <a href="#u6">6 · Confidence from disagreement</a>
+      <a href="#u7">7 · The legible argument</a>
+      <a href="#u8">8 · Cost &amp; the config knobs</a>
+      <a href="#u9">9 · Game-theory refiner</a>
+      <a href="#u10">10 · Checkpoints &amp; build plan</a>
+      <a href="#u11">11 · Not in v1</a>
+    </nav>
+    <div class="actions">
+      <button class="primary" id="copyBtn">Copy feedback markdown</button>
+      <button id="previewBtn">Preview markdown</button>
+      <button id="downloadBtn">Download markdown</button>
+      <button id="clearAllBtn">Clear all notes</button>
+      <div id="exportStatus" aria-live="polite"></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="crumb">docs/specs/decomposition-pyramid.md · checkpoint P0 (spec review before any code)</div>
+    <h2 class="page">Candidate C: the recursive decomposition pyramid</h2>
+    <p class="lede">This is your founding idea, specced for a fair test. Mark each unit
+      <i>agree / revise / discuss / blocker</i>, note anything, then copy the feedback
+      markdown back into chat. Nothing gets built until this page comes back.</p>
+
+    <section class="unit" id="u1">
+      <h3><span class="tag context">context</span>Why C exists — and what's at stake</h3>
+      <div class="purpose">The one candidate that is genuinely yours, and genuinely untested by the field.</div>
+      <div class="body">
+        <p>C breaks a question into the sub-questions that must be answered first, down to a
+        <b>bedrock</b> of researchable facts and base rates, then combines the answers back up
+        into one probability. The research dossier found <b>no published evidence either way</b>
+        on whether this helps calibration — our experiment will be among the first direct tests.</p>
+        <p>Even if C loses on accuracy, it is the only candidate whose output is a
+        <b>readable argument</b> rather than a number with an essay. The portfolio decision
+        already guarantees it a seat: losing means low weight in the architecture pool, not deletion.</p>
+      </div>
+      <div class="prompts"><b>Review prompts</b><ul>
+        <li>Does this framing still match what you originally imagined?</li>
+        <li>Is "legibility even if it loses on Brier" the right success criterion?</li>
+      </ul></div>
+      <div class="anno" data-key="u1" data-title="Why C exists"></div>
+    </section>
+
+    <section class="unit" id="u2">
+      <h3><span class="tag decision">decision</span>The decomposition tree</h3>
+      <div class="purpose">One LLM call turns the question into a typed tree with hard structural caps.</div>
+      <div class="body">
+        <p>Four node types: <b>conjunction</b> ("all of these must happen"), <b>disjunction</b>
+        ("any of these is enough"), <b>conditional chain</b> ("A, then B given A, then C given A and B"),
+        and <b>leaf</b> (bedrock — a base rate, a checkable fact, a direct estimate).</p>
+        <div class="example"><b class="cap">Worked example — "Will Putin visit Iran before Sept 1?"</b>
+          <table class="mini">
+            <tr><th>Node</th><th>Type</th><th>Estimate</th></tr>
+            <tr><td>Standing invitation / summit context exists</td><td>leaf</td><td>0.80</td></tr>
+            <tr><td>Putin chooses the trip, given context</td><td>leaf (conditional)</td><td>0.35</td></tr>
+            <tr><td>Nothing blocks travel (security, health, crisis)</td><td>leaf (conditional)</td><td>0.90</td></tr>
+            <tr><td><b>Root (chain product)</b></td><td>conditional</td><td><b>0.25</b></td></tr>
+          </table>
+          <span style="font-size:13px;color:var(--muted)">Three numbers you can argue with individually — that's the whole point.</span>
+        </div>
+        <p>Caps (all in config): depth ≤ <b>2</b>, children ≤ <b>4</b> per node, never more than
+        <b>3</b> multiplied conjuncts. Over-cap trees are pruned, with the pruning recorded in the
+        trace. The decomposer may also answer "this doesn't decompose" — a single leaf, which makes
+        C gracefully equal a careful single pass.</p>
+        <p>Every node carries a <code>reasoning_type</code> field (default "checklist") so future
+        reasoning modes — like a proven game-theory module — can plug in per-node without redesign.</p>
+      </div>
+      <div class="prompts"><b>Review prompts</b><ul>
+        <li>Is depth 2 deep enough for a first honest test, or too shallow to be a real pyramid?</li>
+        <li>Any node type missing that you expected (e.g. explicit "evidence for/against" nodes)?</li>
+      </ul></div>
+      <div class="anno" data-key="u2" data-title="The decomposition tree"></div>
+    </section>
+
+    <section class="unit" id="u3">
+      <h3><span class="tag decision">decision</span>Bedrock leaves &amp; the outside-view anchor</h3>
+      <div class="purpose">How the bottom of the pyramid gets its numbers.</div>
+      <div class="body">
+        <p>Each leaf is estimated by the existing checklist machinery (the same code candidate A
+        uses), pointed at the leaf's sub-question, over the <b>same shared research bundle</b> —
+        no per-leaf web searches in v1. Every leaf must state a
+        <span class="gloss" title="A comparison class of similar past situations — 'how often do announced state visits actually happen within 3 months?'">reference class</span>
+        and base rate before adjusting. Leaves without an anchor are the classic way pyramids
+        drift into storytelling.</p>
+        <p>Trade-off accepted in v1: shared evidence means a niche leaf ("does Iran's parliament
+        need to ratify visits?") may lack targeted sources. Per-leaf retrieval is queued for v2
+        if P1's argument graphs show leaves starving.</p>
+      </div>
+      <div class="prompts"><b>Review prompts</b><ul>
+        <li>OK to defer per-leaf retrieval to v2, or is it load-bearing for a fair test of C?</li>
+      </ul></div>
+      <div class="anno" data-key="u3" data-title="Bedrock leaves & outside-view anchor"></div>
+    </section>
+
+    <section class="unit" id="u4">
+      <h3><span class="tag risk">risk</span>Error compounding — the enemy — and the guards</h3>
+      <div class="purpose">Why naive pyramids fail, and the three defenses built in.</div>
+      <div class="body">
+        <p>Multiply four slightly-off probabilities and the error compounds: 0.7⁴ ≈ 0.24 even
+        when the true joint chance is far higher, because real sub-events are <b>correlated</b> —
+        the world where the first thing happens is usually a world where the others are likelier
+        too. Naive decomposition systematically drags answers toward 0. This is the documented
+        reason decomposition might <i>lose</i>.</p>
+        <ul>
+          <li><b>Clipping:</b> leaf probabilities clip to [0.03, 0.97] before any multiplication —
+            no leaf gets to claim near-certainty it can't earn.</li>
+          <li><b>Conjunct cap:</b> at most 3 probabilities ever multiply at one node.</li>
+          <li><b>The holistic blend</b> (next unit) — the structural answer never stands alone.</li>
+        </ul>
+      </div>
+      <div class="prompts"><b>Review prompts</b><ul>
+        <li>Is the clip range [0.03, 0.97] sane? (Tighter = more protection, less expressiveness.)</li>
+        <li>Any guard you'd add — e.g. an explicit "are these children correlated?" LLM check?</li>
+      </ul></div>
+      <div class="anno" data-key="u4" data-title="Error compounding & guards"></div>
+    </section>
+
+    <section class="unit" id="u5">
+      <h3><span class="tag decision">decision</span>The 50/50 holistic blend — the key default</h3>
+      <div class="purpose">The single most consequential number in this spec.</div>
+      <div class="body">
+        <p>Alongside the pyramid, one <b>direct holistic forecast</b> of the root question runs
+        (same machinery as candidate A). The final answer is a
+        <span class="gloss" title="Averaging in log-odds space instead of raw probabilities — the mathematically better way to combine forecasts, same machinery the ensemble uses.">log-odds blend</span>
+        of the two, weighted <b>0.5 / 0.5</b> by default.</p>
+        <p>Why half-and-half: it is the honest statement that we don't yet know whether the
+        structure adds or subtracts accuracy. The P2 experiment measures exactly this — if the
+        pyramid earns trust, the weight moves toward structure; if not, toward holistic. In the
+        worked example: structure says 0.25, holistic says 0.15 → blended ≈ <b>0.20</b>.</p>
+        <p>The blend also means C can never be <i>catastrophically</i> worse than A — the failure
+        mode becomes "adds nothing" rather than "poisons the number".</p>
+      </div>
+      <div class="prompts"><b>Review prompts</b><ul>
+        <li>Comfortable with 0.5/0.5 as the frozen starting weight?</li>
+        <li>Should the weight be allowed to differ by question type later (config supports it)?</li>
+      </ul></div>
+      <div class="anno" data-key="u5" data-title="The 50/50 holistic blend"></div>
+    </section>
+
+    <section class="unit" id="u6">
+      <h3><span class="tag decision">decision</span>Confidence from disagreement</h3>
+      <div class="purpose">Where C's confidence label comes from — two signals, combined pessimistically.</div>
+      <div class="body">
+        <ul>
+          <li><b>Weakest link:</b> a multiplied path is only as confident as its least confident leaf.</li>
+          <li><b>Structure vs. holistic agreement:</b> if the pyramid and the direct estimate
+            disagree sharply, confidence caps at "low" — reusing the same disagreement thresholds
+            the ensemble already uses.</li>
+        </ul>
+        <p>That disagreement is a feature, not noise: "the argument says 0.25 but the gut-check
+        says 0.60" is precisely the kind of case postmortems should dig into.</p>
+      </div>
+      <div class="prompts"><b>Review prompts</b><ul>
+        <li>Does "min of the two signals" match your intuition for how cautious the label should be?</li>
+      </ul></div>
+      <div class="anno" data-key="u6" data-title="Confidence from disagreement"></div>
+    </section>
+
+    <section class="unit" id="u7">
+      <h3><span class="tag context">context</span>The legible argument — what you actually get</h3>
+      <div class="purpose">The product payoff, independent of the Brier race.</div>
+      <div class="body">
+        <p>Every C forecast stores the full tree: each node's question, estimate, reference class,
+        rationale, the combination math, the holistic estimate, and the blend. That record is the
+        <b>auditable argument</b> — the thing you asked for on day one ("explanation is core
+        product, just for me") — and it is the designated rendering target for the future web
+        app's forecast view.</p>
+        <p>At P1 you'll review real printed argument graphs from 2–3 live questions; the test at
+        that gate is "is this argument legible and sane?", explicitly <i>not</i> the score.</p>
+      </div>
+      <div class="prompts"><b>Review prompts</b><ul>
+        <li>What would make an argument graph feel trustworthy to you at P1 — anything specific to include?</li>
+      </ul></div>
+      <div class="anno" data-key="u7" data-title="The legible argument"></div>
+    </section>
+
+    <section class="unit" id="u8">
+      <h3><span class="tag context">context</span>Cost &amp; the config knobs</h3>
+      <div class="purpose">What a C forecast costs and what you can tune without code.</div>
+      <div class="body">
+        <p>Per question: one decomposition call (stronger model, ~$0.05) + up to 8 leaf calls
+        (cheap model) + one holistic call ≈ <b>$0.15–0.35</b>. Sits between A (~$0.02) and the
+        6-member ensemble (~$0.50).</p>
+        <p>All tunable in <code>settings.toml [pyramid]</code>: <code>max_depth</code>,
+        <code>max_children</code>, <code>max_conjuncts</code>, <code>leaf_clip_low/high</code>,
+        <code>holistic_blend_weight</code>, plus separate model/effort configs for the
+        decomposer, the leaves, and the holistic pass.</p>
+      </div>
+      <div class="prompts"><b>Review prompts</b><ul>
+        <li>Any knob missing that you'd want to turn without asking for code?</li>
+      </ul></div>
+      <div class="anno" data-key="u8" data-title="Cost & config knobs"></div>
+    </section>
+
+    <section class="unit" id="u9">
+      <h3><span class="tag decision">decision</span>Game-theory as a refinement module</h3>
+      <div class="purpose">Your idea, recorded in the architecture doc in the shape you proposed — confirm it.</div>
+      <div class="body">
+        <p>A <b>refiner</b> is an optional post-pass on <i>any</i> candidate's forecast: it takes
+        the question, evidence, and current forecast, plays out the interval between now and
+        resolution as a strategic interaction (who decides, what they want, which path is stable),
+        and returns an adjusted probability plus its reasoning — all recorded in the trace.</p>
+        <ul>
+          <li>Composable: one module works on top of A, B, C, D, and E.</li>
+          <li>Testable: pre-registered paired experiment, same arm ± refiner.</li>
+          <li>Bounded: full machinery (payoff matrices, equilibrium solving) stays out until the
+            cheap LLM-reasoned version shows signal.</li>
+          <li>C-compatible: via <code>reasoning_type</code>, a proven refiner can later also run
+            <i>inside</i> the pyramid on actor-driven nodes.</li>
+        </ul>
+        <p>Build order: after C's vertical slice (P1), as its own small spec + experiment.</p>
+      </div>
+      <div class="prompts"><b>Review prompts</b><ul>
+        <li>Does this capture the "plays out the game from the current state" idea as you meant it?</li>
+        <li>OK that it queues behind C's P1 rather than being built simultaneously?</li>
+      </ul></div>
+      <div class="anno" data-key="u9" data-title="Game-theory refinement module"></div>
+    </section>
+
+    <section class="unit" id="u10">
+      <h3><span class="tag plan">plan</span>Checkpoints &amp; build plan</h3>
+      <div class="purpose">Where you're in the loop, and who builds what.</div>
+      <div class="body">
+        <table class="mini">
+          <tr><th>Gate</th><th>What you see / decide</th></tr>
+          <tr><td><b>P0</b> (now)</td><td>This page — approve the design before any code exists</td></tr>
+          <tr><td><b>P1</b></td><td>2–3 real questions end-to-end; you judge the printed argument graphs for legibility and sanity</td></tr>
+          <tr><td><b>P2</b></td><td>Pre-registered experiment (C vs A vs B, shared evidence, frozen set) — you sign the freeze; it accrues alongside experiment 001</td></tr>
+        </table>
+        <p>Build (after P0): two Opus agents — one for the schema + combination math with property
+        tests, one for the runner + CLI + config — with Fable review between and after, same
+        pattern as the ensemble build. Nothing runs past P1 without you.</p>
+      </div>
+      <div class="prompts"><b>Review prompts</b><ul>
+        <li>Are these the right pause points, or do you want an extra gate anywhere?</li>
+      </ul></div>
+      <div class="anno" data-key="u10" data-title="Checkpoints & build plan"></div>
+    </section>
+
+    <section class="unit" id="u11">
+      <h3><span class="tag plan">plan</span>Not in v1 — confirm the non-goals</h3>
+      <div class="purpose">Deliberate exclusions; say if any is actually load-bearing for you.</div>
+      <div class="body">
+        <ul>
+          <li>Per-leaf targeted retrieval (v2 candidate, pending P1 evidence)</li>
+          <li>DAG graphs — sub-questions shared between branches (tree only in v1)</li>
+          <li>Modeling correlation between children beyond the guards</li>
+          <li>Multiple-choice / numeric questions (binary only, like everything so far)</li>
+          <li>Refiners (separate module, separate spec)</li>
+          <li>Any live-tournament use (still parked until next season)</li>
+        </ul>
+      </div>
+      <div class="prompts"><b>Review prompts</b><ul>
+        <li>Is any exclusion here something you expected v1 to include?</li>
+      </ul></div>
+      <div class="anno" data-key="u11" data-title="Not in v1 (non-goals)"></div>
+    </section>
+  </main>
+</div>
+
+<dialog id="previewDlg">
+  <h3 style="margin-top:0">Feedback markdown preview</h3>
+  <textarea id="previewText" readonly></textarea>
+  <div style="margin-top:10px; text-align:right">
+    <button id="closeDlg" style="padding:6px 14px">Close</button>
+  </div>
+</dialog>
+
+<script>
+(function () {
+  var STORE = "review-decomposition-pyramid-p0";
+  var STATUSES = ["", "agree", "agree with notes", "revise", "discuss", "blocker"];
+  var state = {};
+  try { state = JSON.parse(localStorage.getItem(STORE) || "{}"); } catch (e) { state = {}; }
+
+  function save() { localStorage.setItem(STORE, JSON.stringify(state)); }
+  function fmtTime(ts) { return ts ? new Date(ts).toLocaleString() : ""; }
+
+  document.querySelectorAll(".anno").forEach(function (panel) {
+    var key = panel.dataset.key;
+    var entry = state[key] || { status: "", note: "", ts: 0 };
+
+    var row = document.createElement("div"); row.className = "row";
+    var label = document.createElement("label");
+    label.textContent = "Status:"; label.htmlFor = key + "-status";
+    var sel = document.createElement("select"); sel.id = key + "-status";
+    STATUSES.forEach(function (s) {
+      var o = document.createElement("option");
+      o.value = s; o.textContent = s === "" ? "— no status —" : s;
+      sel.appendChild(o);
+    });
+    sel.value = entry.status;
+    row.appendChild(label); row.appendChild(sel); panel.appendChild(row);
+
+    var ta = document.createElement("textarea");
+    ta.placeholder = "Notes for this unit…"; ta.value = entry.note;
+    ta.setAttribute("aria-label", "Notes for " + panel.dataset.title);
+    panel.appendChild(ta);
+
+    var meta = document.createElement("div"); meta.className = "meta";
+    var saved = document.createElement("span"); saved.className = "saved";
+    saved.textContent = entry.ts ? "Saved " + fmtTime(entry.ts) : "";
+    var clr = document.createElement("button"); clr.className = "clear";
+    clr.type = "button"; clr.textContent = "Clear this note";
+    meta.appendChild(saved); meta.appendChild(clr); panel.appendChild(meta);
+
+    function update() {
+      state[key] = { status: sel.value, note: ta.value, ts: Date.now(),
+                     title: panel.dataset.title };
+      save(); saved.textContent = "Saved " + fmtTime(state[key].ts);
+    }
+    sel.addEventListener("change", update);
+    ta.addEventListener("input", update);
+    clr.addEventListener("click", function () {
+      sel.value = ""; ta.value = ""; delete state[key]; save();
+      saved.textContent = "";
+    });
+  });
+
+  function buildMarkdown() {
+    var lines = [];
+    lines.push("# Feedback on Candidate C — Decomposition Pyramid (P0)");
+    lines.push("");
+    lines.push("- Source: `docs/specs/decomposition-pyramid.md`");
+    lines.push("- Walkthrough: `docs/specs/decomposition-pyramid-review.html`");
+    lines.push("- Mode: `review`");
+    lines.push("- Generated: " + new Date().toLocaleString());
+    lines.push("");
+    lines.push("## Section Feedback");
+    var any = false;
+    document.querySelectorAll(".anno").forEach(function (panel) {
+      var e = state[panel.dataset.key];
+      if (!e || (!e.status && !e.note)) return;
+      any = true;
+      lines.push("");
+      lines.push("### " + panel.dataset.title);
+      lines.push("");
+      lines.push("- Status: " + (e.status || "(none)"));
+      if (e.note) { lines.push(""); lines.push(e.note); }
+    });
+    if (!any) { lines.push(""); lines.push("_(no sections annotated yet)_"); }
+    return lines.join("\n");
+  }
+
+  var statusEl = document.getElementById("exportStatus");
+  function flash(msg) {
+    statusEl.textContent = msg;
+    setTimeout(function () { statusEl.textContent = ""; }, 4000);
+  }
+
+  document.getElementById("copyBtn").addEventListener("click", function () {
+    var md = buildMarkdown();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(md).then(
+        function () { flash("Copied — paste into chat."); },
+        function () { showPreview(md, true); }
+      );
+    } else { showPreview(md, true); }
+  });
+
+  var dlg = document.getElementById("previewDlg");
+  var previewText = document.getElementById("previewText");
+  function showPreview(md, selectAll) {
+    previewText.value = md;
+    if (typeof dlg.showModal === "function") dlg.showModal();
+    else dlg.setAttribute("open", "open");
+    if (selectAll) { previewText.focus(); previewText.select(); flash("Clipboard blocked — select and copy manually."); }
+  }
+  document.getElementById("previewBtn").addEventListener("click", function () {
+    showPreview(buildMarkdown(), false);
+  });
+  document.getElementById("closeDlg").addEventListener("click", function () { dlg.close ? dlg.close() : dlg.removeAttribute("open"); });
+
+  document.getElementById("downloadBtn").addEventListener("click", function () {
+    var blob = new Blob([buildMarkdown()], { type: "text/markdown" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "decomposition-pyramid-p0-feedback.md";
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(a.href);
+    flash("Downloaded.");
+  });
+
+  document.getElementById("clearAllBtn").addEventListener("click", function () {
+    if (!confirm("Clear every note and status on this page?")) return;
+    state = {}; save();
+    document.querySelectorAll(".anno select").forEach(function (s) { s.value = ""; });
+    document.querySelectorAll(".anno textarea").forEach(function (t) { t.value = ""; });
+    document.querySelectorAll(".anno .saved").forEach(function (s) { s.textContent = ""; });
+    flash("All notes cleared.");
+  });
+})();
+</script>
+</body>
+</html>
