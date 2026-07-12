@@ -57,20 +57,33 @@ Competitor ideas worth testing, from the AIB bot-plans survey ([01-prior-art.md 
 - **Cross-cutting retrieval/reasoning:** resolution-source grounding (fetch the links the question will actually resolve by); code execution for quantitative steps (base rates, distribution fits, simulations); fragility test ("what must go wrong for this forecast to be wrong" — single-fragile-assumption forecasts pulled toward uncertainty).
 - **Parked until MC questions:** option-order shuffling + in-code normalization (the field says multiple-choice is where bots bleed points vs pros).
 
-## Idea backlog (owner)
+## Cross-cutting: refinement modules (owner decision, 2026-07-12)
 
-- **Game-theoretic trajectory modeling** (owner, 2026-07-09): investigate incorporating game
-  theory to model how events might *play out between the forecast date and the resolution
-  date* — treating the interval as a strategic interaction among actors (moves, incentives,
-  equilibria) rather than a static snapshot to extrapolate. Not yet a candidate; investigate
-  fully at some point. Possible shapes when we do: a game-theory *lens* in candidate B's
-  heterogeneous-frame ensemble; a trajectory/scenario simulation step in candidate E; or
-  scoped to actor-driven question classes (geopolitics, negotiations, elections, corporate
-  moves) via question-type routing. Prior art to check first: MASX-AI's doctrinal council
-  already uses game-theoretic frames (prospect theory, balance of power) as ensemble lenses,
-  and Spagbot mixes "game theoretical approaches" into sociopolitical questions ([01 §6](01-prior-art.md))
-  — evidence for whether it pays off may emerge from their season results. Like every idea:
-  enters the system only through a pre-registered backtest experiment.
+A **refiner** is an optional post-pass that any candidate's forecast can flow through:
+input = the question, its research bundle, and the candidate's forecast (probability +
+confidence + rationale); output = an adjusted forecast plus the refiner's own reasoning,
+recorded in the trace. Architecturally it is the reasoning sibling of the extremization
+step (a math post-pass on the pool): same slot in the pipeline, one level richer. Refiners
+compose with every candidate A–E, are toggled per task in config (config-over-code), and
+are evaluated the only way a post-pass honestly can be — a pre-registered paired
+experiment of *arm ± refiner* on identical base forecasts.
+
+- **Game-theoretic trajectory refiner** (owner, 2026-07-09; shaped 2026-07-12): the first
+  planned refiner. From the current data/state, play out the interval between forecast
+  date and resolution date as a strategic interaction — who are the decision-makers, what
+  are their moves and incentives, what path is stable — and adjust the base forecast
+  accordingly. Plausibly strongest on actor-driven questions (geopolitics, negotiations,
+  elections, corporate moves), so question-type routing may gate it. Prior art to check
+  when building: MASX-AI's doctrinal council uses game-theoretic frames as ensemble
+  lenses; Spagbot mixes "game theoretical approaches" into sociopolitical questions
+  ([01 §6](01-prior-art.md)) — their season results may yield evidence first. Full
+  machinery (payoff matrices, equilibrium solving) stays out until the cheap LLM-reasoned
+  version shows signal. Like every idea: enters the system only through a pre-registered
+  experiment.
+
+Candidate C's node schema must stay compatible: nodes carry a `reasoning_type`, so a
+proven refiner can also serve as a *node-level* reasoning mode inside the pyramid where a
+sub-question is actor-driven.
 
 ## Race protocol
 
