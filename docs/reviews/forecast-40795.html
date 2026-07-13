@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forecast — question 40795</title>
+<style>:root {
+  --ink: #1c1c1c; --muted: #5a5a5a; --line: #d9d9d9; --bg: #ffffff;
+  --card: #fafafa; --accent: #2b5b84; --warn: #8a4b08; --evidence: #1f6f43;
+  --model: #6a3fa0;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  color: var(--ink); background: var(--bg); margin: 0; padding: 2rem;
+  line-height: 1.5;
+}
+main { max-width: 900px; margin: 0 auto; }
+h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
+h2 { font-size: 1.05rem; margin: 1.75rem 0 0.6rem; border-bottom: 1px solid var(--line);
+     padding-bottom: 0.25rem; }
+.sub { color: var(--muted); font-size: 0.9rem; margin: 0 0 1rem; }
+.headline { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1rem 0; }
+.stat { border: 1px solid var(--line); border-radius: 6px; padding: 0.6rem 0.9rem;
+        background: var(--card); min-width: 8rem; }
+.stat .label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase;
+               letter-spacing: 0.03em; }
+.stat .value { font-size: 1.3rem; font-weight: 600; }
+.badge { display: inline-block; font-size: 0.72rem; font-weight: 600; padding: 0.1rem 0.45rem;
+         border-radius: 4px; border: 1px solid var(--line); text-transform: uppercase;
+         letter-spacing: 0.03em; }
+.badge.evidence { color: var(--evidence); border-color: var(--evidence); }
+.badge.model-knowledge { color: var(--model); border-color: var(--model); }
+.badge.op { color: var(--accent); border-color: var(--accent); }
+.badge.failed { color: #b00020; border-color: #b00020; }
+.node { border: 1px solid var(--line); border-left: 3px solid var(--accent);
+        border-radius: 6px; padding: 0.75rem 0.9rem; margin: 0.6rem 0; background: var(--card); }
+.node.leaf { border-left-color: var(--evidence); }
+.node .q { font-weight: 600; margin: 0 0 0.35rem; }
+.node .meta { color: var(--muted); font-size: 0.85rem; margin: 0.2rem 0; }
+.node .rationale { font-size: 0.9rem; white-space: pre-wrap; margin: 0.4rem 0 0;
+                   color: #333; }
+.children { margin-left: 1.1rem; margin-top: 0.5rem; }
+.math { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.85rem;
+        background: #f0f0f0; border-radius: 4px; padding: 0.35rem 0.5rem; margin: 0.4rem 0 0; }
+.note { color: var(--warn); font-size: 0.88rem; margin: 0.25rem 0; }
+ul.notes { margin: 0.3rem 0; padding-left: 1.2rem; }
+.member { border: 1px solid var(--line); border-radius: 6px; padding: 0.5rem 0.75rem;
+          margin: 0.4rem 0; background: var(--card); font-size: 0.9rem; }
+.prob { font-variant-numeric: tabular-nums; }
+footer { color: var(--muted); font-size: 0.8rem; margin-top: 2rem;
+         border-top: 1px solid var(--line); padding-top: 0.6rem; }
+</style>
+</head>
+<body>
+<main>
+<h1>Will the winner of the 2026 FIFA World Cup be a country that has never won before?</h1>
+<p class="sub">Question 40795 · post 41090 · decomposition pyramid (candidate C) · 2026-07-12T23:56:26.411566+00:00</p>
+<div class="headline">
+<div class="stat"><div class="label">Structural</div><div class="value">1%</div></div>
+<div class="stat"><div class="label">Holistic</div><div class="value">1%</div></div>
+<div class="stat"><div class="label">Blended (final)</div><div class="value">1%</div></div>
+<div class="stat"><div class="label">Confidence</div><div class="value">high</div></div>
+</div>
+<h2>How the final number was formed</h2>
+<p class="meta">The <strong>structural</strong> estimate (1%) comes from combining the leaf estimates up the tree. The <strong>holistic</strong> estimate (1%) is one direct forecast of the whole question. The final <strong>blended</strong> number (1%) is a log-odds blend of the two, weighting the holistic estimate 0.50.</p>
+<h2>Confidence signals</h2>
+<p class="meta">Reported confidence <strong>high</strong> is the more cautious of two raw signals (both provisional):</p><ul><li>Weakest leaf confidence on a multiplied path: <strong>high</strong></li><li>Structural-vs-holistic disagreement (log-odds gap): <strong>0.00</strong> (smaller = the two agree more)</li></ul>
+<h2>The argument tree</h2>
+<div class="node leaf">
+<p class="q">Will the winner of the 2026 FIFA World Cup be a country that has never previously won the tournament?</p>
+<p class="meta"><span class="badge evidence">evidence</span> 
+<span class="prob"><strong>1%</strong></span> · confidence high</p>
+<p class="meta">Anchor / reference class: World Cup tournaments at semifinal stage with known remaining teams</p>
+<p class="rationale">All four 2026 World Cup semifinalists — France, Spain, Argentina, and England — are previous World Cup winners (France 1998/2018, Spain 2010, Argentina 1978/1986/2022, England 1966). Since only these four teams remain and all have won before, it is impossible for the tournament to be won by a first-time champion. The only way this resolves YES would be through an unprecedented disqualification/replacement scenario, which is negligible.</p>
+</div>
+<footer>Model pyramid-c · dry run · cost $0.0900 · 43312 tokens · search credits 3</footer>
+</main>
+</body>
+</html>

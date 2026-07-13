@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forecast — question 44415</title>
+<style>:root {
+  --ink: #1c1c1c; --muted: #5a5a5a; --line: #d9d9d9; --bg: #ffffff;
+  --card: #fafafa; --accent: #2b5b84; --warn: #8a4b08; --evidence: #1f6f43;
+  --model: #6a3fa0;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  color: var(--ink); background: var(--bg); margin: 0; padding: 2rem;
+  line-height: 1.5;
+}
+main { max-width: 900px; margin: 0 auto; }
+h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
+h2 { font-size: 1.05rem; margin: 1.75rem 0 0.6rem; border-bottom: 1px solid var(--line);
+     padding-bottom: 0.25rem; }
+.sub { color: var(--muted); font-size: 0.9rem; margin: 0 0 1rem; }
+.headline { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1rem 0; }
+.stat { border: 1px solid var(--line); border-radius: 6px; padding: 0.6rem 0.9rem;
+        background: var(--card); min-width: 8rem; }
+.stat .label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase;
+               letter-spacing: 0.03em; }
+.stat .value { font-size: 1.3rem; font-weight: 600; }
+.badge { display: inline-block; font-size: 0.72rem; font-weight: 600; padding: 0.1rem 0.45rem;
+         border-radius: 4px; border: 1px solid var(--line); text-transform: uppercase;
+         letter-spacing: 0.03em; }
+.badge.evidence { color: var(--evidence); border-color: var(--evidence); }
+.badge.model-knowledge { color: var(--model); border-color: var(--model); }
+.badge.op { color: var(--accent); border-color: var(--accent); }
+.badge.failed { color: #b00020; border-color: #b00020; }
+.node { border: 1px solid var(--line); border-left: 3px solid var(--accent);
+        border-radius: 6px; padding: 0.75rem 0.9rem; margin: 0.6rem 0; background: var(--card); }
+.node.leaf { border-left-color: var(--evidence); }
+.node .q { font-weight: 600; margin: 0 0 0.35rem; }
+.node .meta { color: var(--muted); font-size: 0.85rem; margin: 0.2rem 0; }
+.node .rationale { font-size: 0.9rem; white-space: pre-wrap; margin: 0.4rem 0 0;
+                   color: #333; }
+.children { margin-left: 1.1rem; margin-top: 0.5rem; }
+.math { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.85rem;
+        background: #f0f0f0; border-radius: 4px; padding: 0.35rem 0.5rem; margin: 0.4rem 0 0; }
+.note { color: var(--warn); font-size: 0.88rem; margin: 0.25rem 0; }
+ul.notes { margin: 0.3rem 0; padding-left: 1.2rem; }
+.member { border: 1px solid var(--line); border-radius: 6px; padding: 0.5rem 0.75rem;
+          margin: 0.4rem 0; background: var(--card); font-size: 0.9rem; }
+.prob { font-variant-numeric: tabular-nums; }
+footer { color: var(--muted); font-size: 0.8rem; margin-top: 2rem;
+         border-top: 1px solid var(--line); padding-top: 0.6rem; }
+</style>
+</head>
+<body>
+<main>
+<h1>Will Vladimir Putin visit Iran before September 1, 2026?</h1>
+<p class="sub">Question 44415 · post 44406 · decomposition pyramid (candidate C) · 2026-07-12T23:53:31.825535+00:00</p>
+<div class="headline">
+<div class="stat"><div class="label">Structural</div><div class="value">24%</div></div>
+<div class="stat"><div class="label">Holistic</div><div class="value">35%</div></div>
+<div class="stat"><div class="label">Blended (final)</div><div class="value">29%</div></div>
+<div class="stat"><div class="label">Confidence</div><div class="value">low</div></div>
+</div>
+<h2>How the final number was formed</h2>
+<p class="meta">The <strong>structural</strong> estimate (24%) comes from combining the leaf estimates up the tree. The <strong>holistic</strong> estimate (35%) is one direct forecast of the whole question. The final <strong>blended</strong> number (29%) is a log-odds blend of the two, weighting the holistic estimate 0.50.</p>
+<h2>Confidence signals</h2>
+<p class="meta">Reported confidence <strong>low</strong> is the more cautious of two raw signals (both provisional):</p><ul><li>Weakest leaf confidence on a multiplied path: <strong>low</strong></li><li>Structural-vs-holistic disagreement (log-odds gap): <strong>0.52</strong> (smaller = the two agree more)</li></ul>
+<h2>The argument tree</h2>
+<div class="node">
+<p class="q">Will Vladimir Putin personally enter Iranian territory after July 15 and before September 1, 2026?</p>
+<p class="meta"><span class="badge op">disjunction</span></p>
+<p class="math">disjunction: inputs [0.129, 0.130] → clipped [0.129, 0.130] → <strong>0.242</strong></p>
+<div class="children">
+<div class="node">
+<p class="q">Will Putin visit Iran through attendance at the planned August 12 Caspian Summit, given the preceding steps occur?</p>
+<p class="meta"><span class="badge op">conditional</span></p>
+<p class="math">conditional: inputs [0.380, 0.340] → clipped [0.380, 0.340] → <strong>0.129</strong></p>
+<div class="children">
+<div class="node leaf">
+<p class="q">Will the Caspian Summit be held in Iran on or before August 31, rather than postponed or cancelled amid the Iran-US conflict?</p>
+<p class="meta"><span class="badge evidence">evidence</span> 
+<span class="prob"><strong>38%</strong></span> · confidence low</p>
+<p class="meta">Anchor / reference class: Planned international summits in countries under active military conflict</p>
+<p class="rationale">The question asks whether the 7th Caspian Summit will be held in Iran by August 31, 2026, rather than postponed or cancelled amid the active Iran-US conflict.
+
+**Reference class**: Planned international summits in countries experiencing active military conflict.
+
+**Base rate**: Roughly 55-65% of planned diplomatic summits proceed as scheduled even under adverse conditions, as hosts have strong incentives to demonstrate normalcy and resilience. However, when the host country is under active military attack by a major power, the base rate drops substantially.
+
+**Adjustments downward**:
+- As of July 12, 2026, the situation is extremely volatile. The US has launched three phases of airstrikes on Iran, including ~140 targets on July 11 alone [S10, S12]. Iran has closed the Strait of Hormuz and attacked multiple neighboring US-allied states (Qatar, Kuwait, Oman, Jordan, Bahrain, UAE) [S9, S10, S12]. The June ceasefire is declared &#x27;over&#x27; by Trump [S3]. This is not a low-intensity conflict.
+- Iran&#x27;s own ambassador qualified the summit with &#x27;if conditions permit&#x27; [S7], signaling acknowledged uncertainty.
+- Other Caspian states (Kazakhstan, Turkmenistan, Azerbaijan) may be reluctant to send leaders to Tehran during active US airstrikes. Azerbaijan is involved in the US-sponsored TRIPP corridor, which Iran views as hostile [S2].
+- Only ~5 weeks remain, with active escalation rather than de-escalation.
+
+**Adjustments upward**:
+- Iran has strong political motivation to hold the summit to demonstrate it is not isolated [S13 shows continued BRICS engagement; S2 shows active Armenia-Iran partnership].
+- Putin appears committed to attending and meeting the new Supreme Leader Mojtaba Khamenei [S5, S7, S8, S15, S19]. Russia-Iran relations are strong.
+- Tehran is inland on the Caspian side, geographically separated from the Strait of Hormuz conflict zone. Some US strikes hit southern Iran [S12, S13], but Tehran itself has not been reported as a primary target.
+- Diplomatic activities have continued despite the conflict (Armenian PM attended Khamenei&#x27;s funeral [S2]; Iran&#x27;s FM met Putin [S15]; Hormuz talks continue with Omani/Qatari mediation [S3, S11]).
+- A month is sufficient time for a partial de-escalation or ceasefire.
+
+**Strongest counterargument**: Iran has every reason to push forward to show resilience and alliance with Russia. Putin is motivated. The Caspian side is far from the Gulf conflict. Countries routinely proceed with planned events during conflicts. If even a partial de-escalation occurs, the summit could go ahead, perhaps with some participants at lower levels. This could push the probability toward 50%.
+
+However, the sheer intensity of the current escalation—active US bombing of Iran, Iran attacking multiple neighboring states, Hormuz closed, a vow of revenge from the new Supreme Leader—makes postponement quite plausible. The summit requires cooperation from all five Caspian states, and even if Iran and Russia want to proceed, the other three may balk. I settle at 38%.
+
+Confidence is low because the situation is extremely volatile and could shift dramatically in either direction within the next month.</p>
+</div>
+<div class="node leaf">
+<p class="q">Given that the Caspian Summit is held in Iran, will Putin personally attend it rather than send another Russian representative or participate remotely?</p>
+<p class="meta"><span class="badge evidence">evidence</span> 
+<span class="prob"><strong>34%</strong></span> · confidence medium</p>
+<p class="meta">Anchor / reference class: Heads of state attending pre-announced summits in countries under active military conflict</p>
+<p class="rationale">**Question Restatement:** Will Putin physically travel to Iran for the Caspian Summit (planned August 12, 2026, Tehran) rather than send a surrogate or participate remotely? YES requires personal, in-person attendance before the close date of August 31, 2026.
+
+**Reference Class:** Heads of state personally attending pre-announced summits in countries under active military conflict. Base rate for personal attendance at a planned, pre-announced summit is roughly 70-80% under normal conditions.
+
+**Sources:** [S4], [S5], [S7], [S8], [S19] all confirm the summit is being planned for August 12 in Tehran and that Putin&#x27;s visit is being arranged within this framework. [S5] notes Lavrov viewed Iran&#x27;s proposal positively, and Peskov confirmed Putin received a valid invitation though dates weren&#x27;t finalized. [S15] shows Putin has been actively engaging with Iranian leadership (meeting FM Araghchi in St. Petersburg, voicing strong support for Iran).
+
+**Key adjustments from base rate:**
+1. **Active war in host country (major negative):** As of July 12, 2026, Iran is under active US military strikes — 140 targets hit on July 11 alone [S10]. The Strait of Hormuz is closed [S9][S12]. Iran&#x27;s Supreme Leader was killed in February [S2]. Tehran could be a military target. Putin&#x27;s security apparatus would face extreme difficulty guaranteeing his safety. This is the single biggest factor pushing against personal attendance. (-25%)
+2. **Summit postponement/cancellation risk:** [S7] says the summit &#x27;will definitely take place if conditions permit&#x27; — conditional language suggesting possible delay. If postponed beyond August 31, the question resolves NO. (-10%)
+3. **Remote participation is viable:** Iran has already conducted ministerial-level participation by video link [S13]. Putin could do the same. (-5%)
+4. **Strong diplomatic incentive to attend:** First meeting with new Supreme Leader Mojtaba Khamenei [S7][S8], signaling Russia-Iran solidarity against the US, demonstrating Putin isn&#x27;t isolated. (+8%)
+5. **Putin&#x27;s risk tolerance:** He traveled to Iran in 2022 under tensions (though not active war), and has visited other non-Western-aligned countries despite ICC warrant. (+4%)
+
+**Strongest counterargument:** The diplomatic incentives are real — both sides have consistently signaled intent for Putin to attend, and Putin gains strategically from a visible show of support for Iran against the US. If the conflict de-escalates by August, the security calculus changes dramatically. Russia and Iran are deep strategic partners; Putin may calculate that the signaling value outweighs the risk, and Iran&#x27;s security services could guarantee a narrow safe window.
+
+**Conclusion:** The diplomatic intent is genuine and well-documented, but the security environment is unprecedented for a Putin foreign visit — Iran is an active war zone under US bombardment. Combined with the postponement risk and viable remote alternatives, this pulls well below the base rate. I settle at 34%.</p>
+</div>
+</div>
+</div>
+<div class="node leaf">
+<p class="q">Will Putin make a separate, publicly reported personal visit to Iran before September 1, outside attendance at the Caspian Summit?</p>
+<p class="meta"><span class="badge evidence">evidence</span> 
+<span class="prob"><strong>13%</strong></span> · confidence low</p>
+<p class="meta">Anchor / reference class: Putin bilateral visits to Iran distinct from multilateral summit attendance</p>
+<p class="rationale">The question asks whether Putin will make a *separate* bilateral visit to Iran before September 1, 2026, distinct from his attendance at the Caspian Summit (scheduled August 12, 2026, in Tehran per [S4][S5][S7][S8]). The sources confirm only the Caspian Summit trip is firmly planned; [S5] reports Khatibzadeh suggesting a separate visit &#x27;should not be ruled out,&#x27; but this is diplomatic hedging, not a concrete plan. Historically, Putin has made very few dedicated bilateral trips to Iran — most visits have been tied to multilateral events (2017 Caspian Summit, 2022 Astana-format summit). The window is short (~7 weeks), and Putin&#x27;s travel is constrained by security and geopolitical considerations. The unprecedented Russia-Iran strategic alignment and the new supreme leader [S19][S20] could motivate a separate visit, but the base rate is low and no firm plans have been announced. The strongest counterargument is that the current conflict context (US-Iran escalation per [S9][S10]) and deepening military cooperation could prompt a solidarity visit — but this remains speculative. I anchor on the low base rate of separate bilateral Putin visits to Iran.</p>
+</div>
+</div>
+</div>
+<footer>Model pyramid-c · dry run · cost $0.1132 · 73171 tokens · search credits 3</footer>
+</main>
+</body>
+</html>
