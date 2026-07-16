@@ -58,7 +58,8 @@ def _forecast_json(probability: float, confidence: str = "medium") -> str:
         "Reasoning about the base rate and adjustments.\n\n"
         "```json\n"
         f'{{"probability": {probability}, "confidence": "{confidence}", '
-        '"rationale": "leaf rationale", "reference_class": "comparable cases"}\n'
+        '"rationale": "leaf base rate then a small adjustment", '
+        '"reference_class": "comparable cases"}\n'
         "```"
     )
 

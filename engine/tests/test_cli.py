@@ -587,7 +587,7 @@ class _FakeMemberLlm:
             text=(
                 "Reasoning.\n```json\n"
                 f'{{"probability": {self._probability}, "confidence": "medium", '
-                '"rationale": "r", "reference_class": "c"}\n```'
+                '"rationale": "base rate then adjust, briefly", "reference_class": "c"}\n```'
             ),
             input_tokens=100,
             output_tokens=50,
@@ -869,7 +869,8 @@ def test_forecast_pyramid_happy_path(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
     leaf_json = (
         "Reasoning.\n```json\n"
-        '{"probability": 0.5, "confidence": "medium", "rationale": "r", '
+        '{"probability": 0.5, "confidence": "medium", '
+        '"rationale": "base rate then adjust, briefly", '
         '"reference_class": "c"}\n```'
     )
     clients = {

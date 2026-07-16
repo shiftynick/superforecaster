@@ -324,3 +324,26 @@ def test_checklist_prompt_is_documented() -> None:
     # OUTPUT FORMAT documents the JSON contract each field by field.
     for field in ForecastOutput.model_fields:
         assert field in OUTPUT_FORMAT
+
+
+def test_degenerate_rationale_triggers_retry() -> None:
+    """P1 regression: a stub rationale (e.g. 'PLACEHOLDER') is retried, not accepted."""
+    stub = (
+        '{"probability": 0.01, "confidence": "low", '
+        '"rationale": "PLACEHOLDER", "reference_class": "x"}'
+    )
+    client = _FakeLlm(_result(stub), _result(_fenced(0.9)))
+
+    record = run_forecast_pass(_snapshot(), client=client, config=CONFIG, now=NOW)
+
+    assert record.probability == 0.9
+    assert len(client.calls) == 2  # the stub forced the retry
+
+
+def test_user_prompt_includes_open_time_and_window_convention() -> None:
+    """P1 regression: prompts must state when the question opened + the window rule."""
+    from superforecaster.forecaster import _build_user_prompt
+
+    prompt = _build_user_prompt(_snapshot())
+    assert "QUESTION OPENED" in prompt
+    assert "WINDOW CONVENTION" in prompt

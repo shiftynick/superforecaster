@@ -28,7 +28,7 @@ def _fenced(probability: float) -> str:
         "Reasoning about the base rate.\n\n"
         "```json\n"
         f'{{"probability": {probability}, "confidence": "medium", '
-        '"rationale": "r", "reference_class": "c"}\n'
+        '"rationale": "base rate then adjust, briefly", "reference_class": "c"}\n'
         "```"
     )
 

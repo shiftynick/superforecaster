@@ -410,16 +410,37 @@ def _last_balanced_object(text: str) -> str | None:
     return spans[-1] if spans else None
 
 
+# A syntactically valid answer can still be semantically empty — seen live: a
+# leaf pass returned rationale="PLACEHOLDER" with p=0.01 and poisoned a whole
+# pyramid chain (forecast-43852, Iceland). These are the giveaway tokens.
+_DEGENERATE_RATIONALES = ("placeholder", "todo", "tbd", "n/a", "none", "...")
+_MIN_RATIONALE_CHARS = 20
+
+
+class DegenerateOutputError(ValueError):
+    """The model's answer parsed but its rationale is a stub, not reasoning."""
+
+
 def _parse_output(text: str) -> ForecastOutput:
     """Extract, JSON-decode, and validate the model's answer.
 
     Raises:
         json.JSONDecodeError: If no JSON object is present or it is malformed.
         pydantic.ValidationError: If the JSON is present but the wrong shape.
+        DegenerateOutputError: If the shape is right but the rationale is a
+            stub (placeholder text or trivially short) — retried like a parse
+            failure, because a probability without reasoning is unauditable.
     """
     raw = _extract_json_object(text)
     data = json.loads(raw)
-    return ForecastOutput.model_validate(data)
+    output = ForecastOutput.model_validate(data)
+    rationale = output.rationale.strip()
+    if len(rationale) < _MIN_RATIONALE_CHARS or rationale.lower() in _DEGENERATE_RATIONALES:
+        raise DegenerateOutputError(
+            f"rationale is a stub ({rationale[:50]!r}); explain the reasoning that "
+            f"produced the probability"
+        )
+    return output
 
 
 def _build_user_prompt(
@@ -447,8 +468,17 @@ def _build_user_prompt(
         _section("DESCRIPTION", snapshot.description),
         _section("RESOLUTION CRITERIA", snapshot.resolution_criteria),
         _section("FINE PRINT", snapshot.fine_print),
+        _when("QUESTION OPENED", snapshot.open_time),
         _when("SCHEDULED CLOSE TIME", snapshot.scheduled_close_time),
         _when("SCHEDULED RESOLVE TIME", snapshot.scheduled_resolve_time),
+        # Convention note: without this, a question like "will X happen before
+        # <date>" whose condition was ALREADY met before the question even opened
+        # gets read literally (seen live: forecast-43507, Bitcoin) — but such a
+        # question would never have been posted, so the window starts at open.
+        "WINDOW CONVENTION: unless the resolution criteria explicitly say "
+        "otherwise, the eligible window for the event runs from the QUESTION "
+        "OPENED time to the close time — events from before the question opened "
+        "do not count, or the question could not have been posted open.",
     ]
     if research is not None:
         parts.append(_render_sources(research))
@@ -548,7 +578,7 @@ def run_forecast_pass(
     results.append(first)
     try:
         output = _parse_output(first.text)
-    except (json.JSONDecodeError, ValidationError) as first_error:
+    except (json.JSONDecodeError, ValidationError, DegenerateOutputError) as first_error:
         retry_prompt = user_prompt + _retry_note(first_error)
         second = llm.run(
             system,
@@ -561,7 +591,7 @@ def run_forecast_pass(
         results.append(second)
         try:
             output = _parse_output(second.text)
-        except (json.JSONDecodeError, ValidationError) as second_error:
+        except (json.JSONDecodeError, ValidationError, DegenerateOutputError) as second_error:
             raise LlmError(
                 f"Forecast model did not return a valid JSON object after one retry: {second_error}"
             ) from second_error
