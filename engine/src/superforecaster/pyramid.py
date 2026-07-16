@@ -58,6 +58,21 @@ postmortem can audit whether ``model-knowledge`` was ever claimed on something
 that actually needed evidence.
 """
 
+Verifiability = Literal["researchable", "unverifiable"]
+"""Whether a targeted search could settle an assumption now.
+
+``researchable`` assumptions enter the verification pass (one search + one cheap
+verdict call); ``unverifiable`` ones cannot be checked yet and are surfaced but
+never searched.
+"""
+
+AssumptionStatus = Literal["verified-true", "verified-false", "unverified"]
+"""The runtime outcome of verifying an assumption.
+
+``unverified`` is the default (not yet checked, or checking failed / did not
+settle it); ``verified-true`` / ``verified-false`` are set by the verdict call.
+"""
+
 CombinationMode = Literal["guarded-product", "llm-synthesis"]
 """How internal nodes combine their children.
 
@@ -89,6 +104,38 @@ class PyramidParseError(Exception):
 # --- The tree -----------------------------------------------------------------
 
 
+class Assumption(BaseModel):
+    """One implicit near-certain belief a node's estimate silently rests on.
+
+    Every estimate rides on assumptions — probability-≈1 beliefs ("the referendum
+    happens as scheduled", "the source measures what we think it measures"). v2
+    makes them explicit so the checkable ones can be verified with targeted
+    retrieval before the estimate is made.
+
+    Attributes:
+        text: The assumption in plain, falsifiable words.
+        load_bearing: Would the owning node's estimate change materially if this
+            were false? Load-bearing researchable assumptions are verified first
+            when the budget binds.
+        verifiability: ``"researchable"`` (a search could settle it now) or
+            ``"unverifiable"`` (it cannot be checked yet). Only researchable
+            assumptions enter the verification pass.
+        status: Runtime outcome — ``"unverified"`` until the verdict call sets it.
+        evidence: One-line citation or reason produced by verification (empty
+            until then).
+        node_id: The id of the node this assumption belongs to. Filled by the
+            runner's tree-wide collector, so a flat list stays attributable to its
+            node; empty on a node's own ``assumptions`` before collection.
+    """
+
+    text: str
+    load_bearing: bool
+    verifiability: Verifiability
+    status: AssumptionStatus = "unverified"
+    evidence: str = ""
+    node_id: str = ""
+
+
 class PyramidNode(BaseModel):
     """One node of the decomposition tree (v1: a tree, not a DAG).
 
@@ -103,6 +150,10 @@ class PyramidNode(BaseModel):
             mode later, per docs/03).
         grounding: REQUIRED on leaves, absent (``None``) on internal nodes — see
             :data:`Grounding`. The parser enforces both halves of that contract.
+        assumptions: The implicit beliefs this node's estimate rests on (see
+            :class:`Assumption`). Default empty — zero assumptions is legitimate.
+            The parser truncates any list over ``max_assumptions_per_node`` with a
+            :class:`PruneNote`.
         children: Sub-nodes. Empty on a leaf; one or more on an internal node.
     """
 
@@ -111,6 +162,7 @@ class PyramidNode(BaseModel):
     node_type: NodeType
     reasoning_type: str = "checklist"
     grounding: Grounding | None = None
+    assumptions: list[Assumption] = Field(default_factory=list)
     children: list[PyramidNode] = Field(default_factory=list)
 
 
@@ -129,13 +181,14 @@ class PruneNote(BaseModel):
     Attributes:
         node_id: The node the cap acted on.
         cap: Which cap fired — ``"depth"`` (subtree collapsed to a leaf),
-            ``"children"`` (extra children dropped), or ``"conjunct"`` (a
-            conjunction trimmed to the multiplied-conjunct limit).
+            ``"children"`` (extra children dropped), ``"conjunct"`` (a conjunction
+            trimmed to the multiplied-conjunct limit), or ``"assumptions"`` (a
+            node's assumption list truncated to the per-node cap).
         message: A human-readable explanation for the trace / render view.
     """
 
     node_id: str
-    cap: Literal["depth", "children", "conjunct"]
+    cap: Literal["depth", "children", "conjunct", "assumptions"]
     message: str
 
 
@@ -214,7 +267,9 @@ def _enforce(
             raise PyramidParseError(f"leaf node {node.id!r} is missing its 'grounding' label")
         if node.children:
             raise PyramidParseError(f"leaf node {node.id!r} must not have children")
-        return node.model_copy(deep=True)
+        return node.model_copy(
+            deep=True, update={"assumptions": _cap_assumptions(node, settings, notes)}
+        )
 
     # Internal node from here on.
     if not node.children:
@@ -239,6 +294,7 @@ def _enforce(
             node_type="leaf",
             reasoning_type=node.reasoning_type,
             grounding=_PRUNED_LEAF_GROUNDING,
+            assumptions=_cap_assumptions(node, settings, notes),
             children=[],
         )
 
@@ -277,6 +333,7 @@ def _enforce(
         )
         children = children[: settings.max_conjuncts]
 
+    capped_assumptions = _cap_assumptions(node, settings, notes)
     new_children = [
         _enforce(child, depth=depth + 1, settings=settings, notes=notes) for child in children
     ]
@@ -286,8 +343,40 @@ def _enforce(
         node_type=node.node_type,
         reasoning_type=node.reasoning_type,
         grounding=None,
+        assumptions=capped_assumptions,
         children=new_children,
     )
+
+
+def _cap_assumptions(
+    node: PyramidNode,
+    settings: PyramidSettings,
+    notes: list[PruneNote],
+) -> list[Assumption]:
+    """Return ``node``'s assumptions, truncated to the per-node cap.
+
+    A list over ``settings.max_assumptions_per_node`` keeps the first N and drops
+    the overflow, recording one :class:`PruneNote` (``cap="assumptions"``) — the
+    runaway-output guard from the spec, never a silent truncation. Each returned
+    assumption is a deep copy so the enforced tree never shares mutable state with
+    the input.
+    """
+    assumptions = list(node.assumptions)
+    cap = settings.max_assumptions_per_node
+    if len(assumptions) > cap:
+        dropped = len(assumptions) - cap
+        notes.append(
+            PruneNote(
+                node_id=node.id,
+                cap="assumptions",
+                message=(
+                    f"node {node.id!r} listed {len(assumptions)} assumptions; dropped "
+                    f"{dropped} beyond the max_assumptions_per_node limit ({cap})"
+                ),
+            )
+        )
+        assumptions = assumptions[:cap]
+    return [a.model_copy(deep=True) for a in assumptions]
 
 
 # --- Combination math ---------------------------------------------------------

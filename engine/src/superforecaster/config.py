@@ -176,6 +176,13 @@ class PyramidSettings:
             ``0.5`` — the honest prior that we do not yet know which to trust.
         combination_mode: How internal nodes combine children. ``"guarded-product"``
             (v1) or the reserved ``"llm-synthesis"``.
+        max_assumptions_per_node: Runaway-output guard (v2) — a node's surfaced
+            assumption list is truncated to this many, with a prune note. Default
+            ``8``. Surfacing is cheap, so this only stops pathological output.
+        max_assumption_verifications: Budget cap (v2) on how many researchable
+            assumptions are verified per question (one search + one verdict call
+            each). Load-bearing researchable assumptions are verified first.
+            Default ``6``.
     """
 
     max_depth: int = 2
@@ -185,6 +192,8 @@ class PyramidSettings:
     leaf_clip_high: float = 0.97
     holistic_blend_weight: float = 0.5
     combination_mode: CombinationMode = "guarded-product"
+    max_assumptions_per_node: int = 8
+    max_assumption_verifications: int = 6
 
 
 @dataclass(frozen=True)
@@ -530,6 +539,12 @@ def load_pyramid_settings(path: Path | None = None) -> PyramidSettings:
         leaf_clip_high=_float_field(table, "leaf_clip_high", d.leaf_clip_high),
         holistic_blend_weight=_float_field(table, "holistic_blend_weight", d.holistic_blend_weight),
         combination_mode=mode,
+        max_assumptions_per_node=_int_field(
+            table, "max_assumptions_per_node", d.max_assumptions_per_node
+        ),
+        max_assumption_verifications=_int_field(
+            table, "max_assumption_verifications", d.max_assumption_verifications
+        ),
     )
 
 

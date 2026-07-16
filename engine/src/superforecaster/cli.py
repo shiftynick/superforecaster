@@ -523,6 +523,9 @@ def forecast(
 
             if pyramid_settings is not None:
                 assert pyramid_factory is not None  # set whenever pyramid is on
+                # The verification pass issues its searches through the general-web
+                # client (unmetered) when research is on; blind runs verify nothing.
+                verify_client = research_ctx.general if research_ctx is not None else None
                 record = _forecast_pyramid_question(
                     snapshot,
                     pyramid_settings,
@@ -530,6 +533,7 @@ def forecast(
                     pyramid_factory,
                     bundle,
                     research_state,
+                    search_client=verify_client,
                     now=now,
                     to_store=to_store,
                     failures=failures,
@@ -668,6 +672,7 @@ def _forecast_pyramid_question(
     bundle: ResearchBundle | None,
     research_state: str,
     *,
+    search_client: SearchClient | None,
     now: datetime,
     to_store: list[ForecastRecord],
     failures: list[str],
@@ -687,6 +692,7 @@ def _forecast_pyramid_question(
             settings=settings,
             ensemble_settings=ensemble_settings,
             research=bundle,
+            search_client=search_client,
             client_factory=client_factory,
             now=now,
         )

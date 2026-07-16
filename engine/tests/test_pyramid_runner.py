@@ -20,7 +20,11 @@ from superforecaster.config import TaskModelConfig
 from superforecaster.forecaster import ForecastRecord
 from superforecaster.llm import LlmError, LlmResult
 from superforecaster.models import QuestionSnapshot
-from superforecaster.pyramid_runner import run_pyramid_forecast
+from superforecaster.pyramid import Assumption
+from superforecaster.pyramid_runner import (
+    _select_assumptions_to_verify,
+    run_pyramid_forecast,
+)
 from superforecaster.research import ResearchBundle
 from superforecaster.search import SearchResult
 
@@ -42,6 +46,11 @@ max_tokens = 1000
 [tasks.holistic]
 provider = "claude-cli"
 model = "holistic-model"
+max_tokens = 1000
+
+[tasks.assumption_verdict]
+provider = "claude-cli"
+model = "verdict-model"
 max_tokens = 1000
 """
 
@@ -354,3 +363,241 @@ def test_blind_run_has_no_bundle_anywhere(_pin_settings: None) -> None:
     for call in leaf.calls:
         prompt = call["prompt"]
         assert isinstance(prompt, str) and "SOURCES" not in prompt
+
+
+# --- Assumption verification --------------------------------------------------
+
+# A two-leaf conjunction where leaf a carries one load-bearing RESEARCHABLE
+# assumption and leaf b carries one UNVERIFIABLE assumption (never searched).
+_ASSUMPTION_TREE = (
+    '{"id": "root", "question": "Will the whole thing happen?", '
+    '"node_type": "conjunction", "children": ['
+    '{"id": "a", "question": "Will step A happen?", "node_type": "leaf", '
+    '"grounding": "evidence", "assumptions": ['
+    '{"text": "The vote happens on schedule", "load_bearing": true, '
+    '"verifiability": "researchable"}]}, '
+    '{"id": "b", "question": "Is the base rate high?", "node_type": "leaf", '
+    '"grounding": "model-knowledge", "assumptions": ['
+    '{"text": "No one redefines the metric", "load_bearing": false, '
+    '"verifiability": "unverifiable"}]}]}'
+)
+
+
+def _verdict_json(verdict: str, evidence: str = "settled by the official calendar") -> str:
+    return (
+        "Weighing the evidence.\n\n```json\n"
+        f'{{"verdict": "{verdict}", "evidence": "{evidence}"}}\n```'
+    )
+
+
+class _FakeSearch:
+    """A fake search client: records queries, returns canned results, meters credits.
+
+    Mirrors the ``SearchClient`` protocol (``search(query, *, max_results, ...)``).
+    When ``per_call_credits`` > 0 it also exposes ``credits_used_this_month`` (like
+    the metered AskNews client) so the runner's credit accounting can be exercised.
+    """
+
+    def __init__(
+        self,
+        results: list[SearchResult] | None = None,
+        *,
+        error: Exception | None = None,
+        per_call_credits: int = 0,
+    ) -> None:
+        self._results = results if results is not None else [_search_result()]
+        self._error = error
+        self._per_call = per_call_credits
+        self._credits = 0
+        self.queries: list[str] = []
+
+    def search(
+        self,
+        query: str,
+        *,
+        max_results: int,
+        start_date: object = None,
+        end_date: object = None,
+    ) -> list[SearchResult]:
+        self.queries.append(query)
+        if self._error is not None:
+            raise self._error
+        self._credits += self._per_call
+        return list(self._results)
+
+    def credits_used_this_month(self) -> int:
+        return self._credits
+
+
+def _search_result() -> SearchResult:
+    return SearchResult(
+        url="https://gov.example/calendar",
+        title="Official vote calendar",
+        snippet="The vote is scheduled as planned.",
+        published_at=None,
+        source_domain="gov.example",
+        provider="tavily",
+        raw={},
+    )
+
+
+def _verification_clients(verdict_reply: object) -> dict[str, _RecordingLlm]:
+    """The four task clients a verification run drives (verdict reply scripted)."""
+    return {
+        "decompose-model": _RecordingLlm([_tree_json(_ASSUMPTION_TREE)]),
+        "leaf-model": _RecordingLlm([_forecast_json(0.5), _forecast_json(0.4)]),
+        "holistic-model": _RecordingLlm([_forecast_json(0.3)]),
+        "verdict-model": _RecordingLlm([verdict_reply]),
+    }
+
+
+def test_assumption_verification_happy_path(_pin_settings: None) -> None:
+    clients = _verification_clients(_verdict_json("verified-true"))
+    search = _FakeSearch(per_call_credits=2)
+
+    record = run_pyramid_forecast(
+        _snapshot(),
+        research=_bundle(),
+        search_client=search,
+        client_factory=_factory_by_model(clients),
+        now=NOW,
+    )
+    detail = record.pyramid
+    assert detail is not None
+
+    # Both assumptions are stored flat, with node ids filled by the collector.
+    assert {a.node_id for a in detail.assumptions} == {"a", "b"}
+    researchable = next(a for a in detail.assumptions if a.node_id == "a")
+    unverifiable = next(a for a in detail.assumptions if a.node_id == "b")
+    assert researchable.status == "verified-true"
+    assert researchable.evidence == "settled by the official calendar"
+    # The unverifiable one is never searched — it stays unverified.
+    assert unverifiable.status == "unverified"
+
+    # Exactly one researchable assumption was verified: one search issued.
+    assert search.queries == ["The vote happens on schedule"]
+    assert detail.assumption_verifications_run == 1
+    assert detail.assumption_search_credits == 2
+
+    # Verification search credits fold into the record's total (bundle 3 + 2).
+    assert record.research_search_credits == 5
+    # Cost: decompose + 2 leaves + holistic + 1 verdict = 5 calls x $0.01.
+    assert record.cost_usd == pytest.approx(0.05)
+
+
+def test_assumption_verdict_failure_degrades_to_unverified(_pin_settings: None) -> None:
+    # The verdict LLM raises: the assumption is left unverified, with a note.
+    clients = _verification_clients(LlmError("verdict boom"))
+    search = _FakeSearch(per_call_credits=2)
+
+    record = run_pyramid_forecast(
+        _snapshot(),
+        research=_bundle(),
+        search_client=search,
+        client_factory=_factory_by_model(clients),
+        now=NOW,
+    )
+    detail = record.pyramid
+    assert detail is not None
+    researchable = next(a for a in detail.assumptions if a.node_id == "a")
+    assert researchable.status == "unverified"
+    assert any("verdict call failed" in note for note in detail.notes)
+    # The search still ran (credit drawn) even though the verdict failed.
+    assert detail.assumption_search_credits == 2
+
+
+def test_assumption_search_failure_degrades_to_unverified(_pin_settings: None) -> None:
+    from superforecaster.search import SearchError
+
+    clients = _verification_clients(_verdict_json("verified-true"))
+    search = _FakeSearch(error=SearchError("search down"))
+
+    record = run_pyramid_forecast(
+        _snapshot(),
+        research=_bundle(),
+        search_client=search,
+        client_factory=_factory_by_model(clients),
+        now=NOW,
+    )
+    detail = record.pyramid
+    assert detail is not None
+    researchable = next(a for a in detail.assumptions if a.node_id == "a")
+    assert researchable.status == "unverified"
+    assert any("verification search failed" in note for note in detail.notes)
+    # The verdict client's scripted reply was never consumed (no verdict call).
+    assert clients["verdict-model"].calls == []
+
+
+def test_verified_false_injected_into_leaf_prompt(_pin_settings: None) -> None:
+    clients = _verification_clients(_verdict_json("verified-false", "the vote was postponed"))
+    search = _FakeSearch(per_call_credits=1)
+
+    record = run_pyramid_forecast(
+        _snapshot(),
+        research=_bundle(),
+        search_client=search,
+        client_factory=_factory_by_model(clients),
+        now=NOW,
+    )
+    detail = record.pyramid
+    assert detail is not None
+    researchable = next(a for a in detail.assumptions if a.node_id == "a")
+    assert researchable.status == "verified-false"
+
+    # Leaf a owns the falsified assumption; its estimation SYSTEM prompt must carry
+    # the corrected-assumption injection. Leaf b (no falsified assumption) must not.
+    leaf = clients["leaf-model"]
+    a_system = leaf.calls[0]["system"]
+    b_system = leaf.calls[1]["system"]
+    assert isinstance(a_system, str) and isinstance(b_system, str)
+    assert "CORRECTED ASSUMPTIONS" in a_system
+    assert "The vote happens on schedule" in a_system
+    assert "the vote was postponed" in a_system
+    assert "CORRECTED ASSUMPTIONS" not in b_system
+
+
+def test_no_search_client_leaves_assumptions_unverified(_pin_settings: None) -> None:
+    # search_client=None disables verification: assumptions surfaced, none checked.
+    clients = _verification_clients(_verdict_json("verified-true"))
+
+    record = run_pyramid_forecast(
+        _snapshot(),
+        research=_bundle(),
+        search_client=None,
+        client_factory=_factory_by_model(clients),
+        now=NOW,
+    )
+    detail = record.pyramid
+    assert detail is not None
+    assert {a.node_id for a in detail.assumptions} == {"a", "b"}
+    assert all(a.status == "unverified" for a in detail.assumptions)
+    assert detail.assumption_verifications_run == 0
+    assert detail.assumption_search_credits == 0
+    assert record.research_search_credits == 3  # bundle only, no verification draw
+    assert any("no search client" in note for note in detail.notes)
+    # The verdict client was never used.
+    assert clients["verdict-model"].calls == []
+
+
+def test_select_assumptions_dedupe_ordering_and_cap() -> None:
+    # Tree order: nlb1, lb1 (dup of lb-a later), nlb2, lb2. Load-bearing first,
+    # tree order preserved within each group, near-identical text deduped, cap 2.
+    assumptions = [
+        Assumption(text="Not load bearing one", load_bearing=False, verifiability="researchable"),
+        Assumption(text="Load bearing A", load_bearing=True, verifiability="researchable"),
+        Assumption(text="  load  BEARING a  ", load_bearing=True, verifiability="researchable"),
+        Assumption(text="Load bearing B", load_bearing=True, verifiability="researchable"),
+    ]
+    selected = _select_assumptions_to_verify(assumptions, cap=2)
+    # Deduped ["Not load bearing one", "Load bearing A", "Load bearing B"] then
+    # load-bearing-first -> [A, B, Not...], capped at 2 -> [A, B].
+    assert [a.text for a in selected] == ["Load bearing A", "Load bearing B"]
+
+
+def test_select_assumptions_orders_load_bearing_first() -> None:
+    assumptions = [
+        Assumption(text="cheap check", load_bearing=False, verifiability="researchable"),
+        Assumption(text="pivotal check", load_bearing=True, verifiability="researchable"),
+    ]
+    selected = _select_assumptions_to_verify(assumptions, cap=5)
+    assert [a.text for a in selected] == ["pivotal check", "cheap check"]

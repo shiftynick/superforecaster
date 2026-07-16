@@ -39,7 +39,7 @@ from pydantic import BaseModel, Field, ValidationError
 from .config import TaskModelConfig, load_task_config, price_for
 from .llm import LlmClient, LlmError, LlmResult, build_llm_client
 from .models import QuestionSnapshot
-from .pyramid import CombinationStep, Grounding, PruneNote, PyramidNode
+from .pyramid import Assumption, CombinationStep, Grounding, PruneNote, PyramidNode
 from .research import ResearchBundle
 
 Confidence = Literal["low", "medium", "high"]
@@ -165,8 +165,19 @@ class PyramidDetail(BaseModel):
             between the structural and holistic estimates (stored raw).
         decompose_failed: ``True`` when decomposition failed after its retry and
             the tree degraded to a single careful leaf.
+        assumptions: Every assumption surfaced across the tree, flat, each carrying
+            its ``node_id``, verification ``status``, and ``evidence`` — the
+            "which assumption broke?" postmortem view. Defaults to empty so
+            pre-v2 records still parse.
+        assumption_verifications_run: How many researchable assumptions were
+            actually put through the verification pass (one search + one verdict
+            call each) — the budget actually spent, ``≤`` the config cap.
+        assumption_search_credits: Metered search credits the verification pass
+            drew (folded into the record's ``research_search_credits`` total; kept
+            here too so the verification share stays legible).
         notes: Free-form trace notes (decompose fallback, failed leaves, a failed
-            holistic pass) — the honest record of every degrade that happened.
+            holistic pass, verification degrades) — the honest record of every
+            degrade that happened.
     """
 
     tree: PyramidNode
@@ -179,6 +190,9 @@ class PyramidDetail(BaseModel):
     weakest_leaf_confidence: Confidence
     structural_holistic_gap: float
     decompose_failed: bool
+    assumptions: list[Assumption] = Field(default_factory=list)
+    assumption_verifications_run: int = 0
+    assumption_search_credits: int = 0
     notes: list[str]
 
 

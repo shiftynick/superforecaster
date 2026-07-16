@@ -12,6 +12,7 @@ from hypothesis import strategies as st
 
 from superforecaster.config import PyramidSettings, load_pyramid_settings
 from superforecaster.pyramid import (
+    Assumption,
     PyramidNode,
     PyramidParseError,
     blend,
@@ -183,6 +184,91 @@ def test_conjunct_cap_not_applied_to_disjunction() -> None:
     assert len(tree.children) == 4
 
 
+# --- Assumptions: schema + guard ----------------------------------------------
+
+
+def _assumption(
+    text: str, load_bearing: bool = True, verifiability: str = "researchable"
+) -> dict[str, object]:
+    return {"text": text, "load_bearing": load_bearing, "verifiability": verifiability}
+
+
+def test_parse_leaf_with_assumptions() -> None:
+    raw = {
+        "id": "root",
+        "question": "q",
+        "node_type": "leaf",
+        "grounding": "evidence",
+        "assumptions": [
+            _assumption("The vote happens on schedule", True, "researchable"),
+            _assumption("Nobody redefines the metric", False, "unverifiable"),
+        ],
+    }
+    tree, notes = parse_decomposition(raw, _SETTINGS)
+    assert notes == []
+    assert len(tree.assumptions) == 2
+    a0 = tree.assumptions[0]
+    assert a0.text == "The vote happens on schedule"
+    assert a0.load_bearing is True
+    assert a0.verifiability == "researchable"
+    # Runtime fields default until the verification pass fills them.
+    assert a0.status == "unverified"
+    assert a0.evidence == ""
+    assert a0.node_id == ""
+    assert tree.assumptions[1].verifiability == "unverifiable"
+
+
+def test_internal_node_carries_assumptions() -> None:
+    raw = {
+        "id": "root",
+        "question": "q",
+        "node_type": "conjunction",
+        "assumptions": [_assumption("The regime holds")],
+        "children": [_leaf("a"), _leaf("b", "model-knowledge")],
+    }
+    tree, notes = parse_decomposition(raw, _SETTINGS)
+    assert notes == []
+    assert [a.text for a in tree.assumptions] == ["The regime holds"]
+
+
+def test_assumptions_over_cap_truncated_with_note() -> None:
+    settings = PyramidSettings(max_assumptions_per_node=3)
+    raw = {
+        "id": "root",
+        "question": "q",
+        "node_type": "leaf",
+        "grounding": "evidence",
+        "assumptions": [_assumption(f"assumption {i}") for i in range(5)],
+    }
+    tree, notes = parse_decomposition(raw, settings)
+    assert [n.cap for n in notes] == ["assumptions"]
+    assert notes[0].node_id == "root"
+    assert "dropped 2" in notes[0].message
+    assert len(tree.assumptions) == 3
+    assert [a.text for a in tree.assumptions] == [f"assumption {i}" for i in range(3)]
+
+
+def test_assumptions_at_cap_not_truncated() -> None:
+    settings = PyramidSettings(max_assumptions_per_node=3)
+    raw = {
+        "id": "root",
+        "question": "q",
+        "node_type": "leaf",
+        "grounding": "evidence",
+        "assumptions": [_assumption(f"a{i}") for i in range(3)],
+    }
+    tree, notes = parse_decomposition(raw, settings)
+    assert notes == []
+    assert len(tree.assumptions) == 3
+
+
+def test_assumption_defaults_are_runtime_neutral() -> None:
+    a = Assumption(text="x", load_bearing=True, verifiability="researchable")
+    assert a.status == "unverified"
+    assert a.evidence == ""
+    assert a.node_id == ""
+
+
 # --- JSON schema --------------------------------------------------------------
 
 
@@ -192,7 +278,10 @@ def test_decomposition_json_schema_shape() -> None:
     # Recursive model -> pydantic emits a $ref/$defs form; the node fields live in
     # one of those definitions. Confirm the key fields appear somewhere in it.
     text = str(schema)
-    for field in ("node_type", "grounding", "children", "reasoning_type"):
+    for field in ("node_type", "grounding", "children", "reasoning_type", "assumptions"):
+        assert field in text
+    # The Assumption sub-model's fields appear in the schema's $defs too.
+    for field in ("load_bearing", "verifiability"):
         assert field in text
 
 
@@ -345,6 +434,23 @@ def test_load_pyramid_settings_defaults(tmp_path: Path) -> None:
     path.write_text("[tournament]\nlive = 'x'\n", encoding="utf-8")
     settings = load_pyramid_settings(path)
     assert settings == PyramidSettings()
+
+
+def test_pyramid_settings_assumption_defaults() -> None:
+    settings = PyramidSettings()
+    assert settings.max_assumptions_per_node == 8
+    assert settings.max_assumption_verifications == 6
+
+
+def test_load_pyramid_settings_assumption_knobs(tmp_path: Path) -> None:
+    toml = "[pyramid]\nmax_assumptions_per_node = 5\nmax_assumption_verifications = 2\n"
+    path = tmp_path / "settings.toml"
+    path.write_text(toml, encoding="utf-8")
+    settings = load_pyramid_settings(path)
+    assert settings.max_assumptions_per_node == 5
+    assert settings.max_assumption_verifications == 2
+    # Untouched knobs keep their defaults.
+    assert settings.max_depth == PyramidSettings().max_depth
 
 
 def test_load_pyramid_settings_full_table(tmp_path: Path) -> None:
