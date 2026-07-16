@@ -1,7 +1,9 @@
 # Spec: Candidate C v2 — Assumption Surfacing & Verification
 
-- Status: draft — awaiting owner review (V0 gate below)
-- Date: 2026-07-12
+- Status: **V0 approved with revisions** (owner review 2026-07-16 via annotated page;
+  revisions folded in: no hard assumption cap + load-bearing-first verification priority;
+  adaptive decomposition recorded as the C v3 direction)
+- Date: 2026-07-12 (revised 2026-07-16)
 - Parent docs: [decomposition-pyramid.md](decomposition-pyramid.md) (v1, built),
   [03-architecture-candidates.md](../03-architecture-candidates.md) (§ C guards, § grafts
   "fragility test"), owner direction 2026-07-12 ("break down the nodes based on
@@ -31,9 +33,13 @@ Every node gains `assumptions: list[Assumption]` (default empty). `Assumption`:
 - (filled at runtime) `status: "verified-true" | "verified-false" | "unverified"`,
   `evidence: str` (one-line citation or reason), `verification_cost_usd`.
 
-The decomposer prompt is extended: for each node, surface 0–3 assumptions the estimate
-rests on, marking load-bearing and verifiability. Zero assumptions is a legitimate
-answer — do not manufacture filler.
+The decomposer prompt is extended: for each node, surface **every assumption the
+estimate genuinely rests on** (owner revision at V0 — no hard cap of 3; prompt guidance
+says "typically 1–4, but list all real ones; do not manufacture filler"; a config parser
+guard `max_assumptions_per_node` = 8 exists only to stop runaway output). Zero
+assumptions is a legitimate answer. Surfacing is cheap (tokens); verification is what
+costs — so when the verification budget binds, **load-bearing researchable assumptions
+are verified first**, then non-load-bearing, in tree order.
 
 ### 2. Verification pass (new, pyramid_runner.py)
 
@@ -93,6 +99,19 @@ v1 (~$0.20/q) + up to 6 verdict calls (~$0.01 each cheap model) + extra search c
 
 Assumption graphs across questions (shared world-model); recursive assumption
 decomposition; assumptions as tradable conjuncts in the math; multi-round verification.
+
+## Recorded direction — C v3: analysis-driven (adaptive) decomposition (owner, V0 feedback 2026-07-16)
+
+The owner identified a circularity in the v1/v2 shape: the decomposer judges *before
+analysis* which sub-questions are knowable and where to stop — a prediction of
+knowability, when the principle demands a measurement. v3 direction: **the tree grows
+where analysis says it should** — estimate leaves first; a leaf that returns
+low confidence with thin evidence triggers an expansion attempt (decompose THAT leaf,
+within depth/budget caps); a split whose children analyze *worse* than their parent's
+holistic read is retracted. Structure becomes an output of analysis, not a prior guess.
+Requires an expand/retract loop in the runner with hard budget caps. Specced and
+registered as its own experiment after 003 (v2 vs v1) reports — one design change per
+evidence step.
 
 ## Evidence plan
 
