@@ -433,6 +433,7 @@ def load_manifests(directory: Path | None = None) -> list[ExperimentManifest]:
 def resolutions_from_store(
     latest_by_question: Mapping[int, object],
     question_ids: Iterable[int],
+    web_overlay: Mapping[int, str | None] | None = None,
 ) -> dict[int, str | None]:
     """Extract a ``{question_id: resolution}`` map for the given questions.
 
@@ -440,9 +441,22 @@ def resolutions_from_store(
     (each value a :class:`QuestionSnapshot`); only its ``resolution`` attribute is
     read, so any object exposing that works. Questions absent from the store map
     to ``None`` (unknown / not snapshotted).
+
+    ``web_overlay`` is an optional ``{question_id: resolution}`` map read off the
+    public Metaculus pages (see :mod:`superforecaster.web_resolutions`). The
+    precedence is deliberate: an API-derived resolution always wins when present,
+    and the web value only *fills a gap* (used when the API left the resolution
+    ``None``). This keeps the function pure — the overlay is passed in, never
+    loaded here — so it stays trivially testable.
     """
     out: dict[int, str | None] = {}
     for qid in question_ids:
         snapshot = latest_by_question.get(qid)
-        out[qid] = getattr(snapshot, "resolution", None) if snapshot is not None else None
+        api_resolution = getattr(snapshot, "resolution", None) if snapshot is not None else None
+        if api_resolution is not None:
+            out[qid] = api_resolution
+        elif web_overlay is not None:
+            out[qid] = web_overlay.get(qid)
+        else:
+            out[qid] = None
     return out

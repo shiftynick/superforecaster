@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -56,6 +57,12 @@ from .research_cache import ResearchCache
 from .search import SearchClient, build_search_client, read_asknews_credits_used
 from .store import SnapshotStore
 from .submission import SubmissionClient, SubmissionError
+from .web_resolutions import (
+    WebResolution,
+    WebResolutionStore,
+    default_page_loader,
+    fetch_resolution,
+)
 
 app = typer.Typer(
     add_completion=False,
@@ -130,6 +137,43 @@ def _require_token() -> str:
 def _build_client(token: str) -> MetaculusClient:
     """Construct the real Metaculus client. Tests replace this to inject a fake."""
     return MetaculusClient(token=token)
+
+
+# Web-resolution pass tunables. The volume is tiny (a few questions resolve per
+# week across ~45 pinned questions), so we crawl politely and cap hard: at most
+# one page every few seconds, and never more than a fixed number of pages a run.
+_WEB_THROTTLE_SECONDS = 3.0
+_WEB_PAGE_CAP = 20
+
+
+def _resolve_web_resolution_dir(data_dir: Path | None) -> Path:
+    """Pick the web-resolution directory.
+
+    With an explicit ``--data-dir``, web resolutions sit beside the snapshots
+    under the same data root (``<data-dir>/../web-resolutions``), so a test's
+    artifacts stay together. Otherwise the config default
+    (``[data] web_resolution_dir``) is used.
+    """
+    if data_dir is not None:
+        return data_dir.parent / "web-resolutions"
+    return load_settings().data.web_resolution_dir
+
+
+# Seam for tests: monkeypatched to inject a fake page loader (no browser).
+def _build_web_page_loader() -> Callable[[str], str]:
+    """Return the page loader the web-resolution pass uses (real headless browser).
+
+    Tests monkeypatch this to hand back a fake loader that returns canned page
+    text, so the web pass is exercised end-to-end without launching Chromium.
+    """
+    return default_page_loader
+
+
+# Seam for tests: monkeypatched to a spy/no-op so the throttle is observed
+# without real waiting.
+def _web_sleep(seconds: float) -> None:  # pragma: no cover - thin time.sleep wrapper
+    """Sleep between web-resolution page loads (the polite crawl throttle)."""
+    time.sleep(seconds)
 
 
 def _provider_unavailable_help(provider: str) -> str:
@@ -293,9 +337,27 @@ def scrape(
 @app.command("update-resolutions")
 def update_resolutions(
     limit: int = typer.Option(100, "--limit", help="Max unresolved questions to re-check."),
+    from_web: bool = typer.Option(
+        True,
+        "--from-web/--no-from-web",
+        help=(
+            "After the API pass, fill still-missing resolutions by reading the "
+            "public Metaculus question pages with a headless browser (the API "
+            "hides 'resolution' unless the account forecast on the question). "
+            "On by default."
+        ),
+    ),
     data_dir: Path | None = _DataDirOption,
 ) -> None:
-    """Re-fetch tracked, still-open questions to capture any new resolutions."""
+    """Re-fetch tracked, still-open questions to capture any new resolutions.
+
+    Two passes. First the API pass re-fetches each still-open tracked question and
+    appends a fresh snapshot. Then, unless ``--no-from-web`` is given, a web pass
+    reads outcomes off the public question pages for tracked questions whose latest
+    snapshot is resolved/closed yet still carries no ``resolution`` (the API's
+    access-tier gap) — throttled and hard-capped, and recorded with provenance in
+    the web-resolution store.
+    """
     token = _require_token()
     store = SnapshotStore(_resolve_data_dir(data_dir))
     post_ids = store.unresolved_question_post_ids()[:limit]
@@ -322,6 +384,63 @@ def update_resolutions(
         f"update-resolutions: checked={len(post_ids)} written={written} "
         f"newly_resolved={newly_resolved}"
     )
+
+    if from_web:
+        _web_resolution_pass(store, data_dir)
+
+
+def _web_resolution_pass(store: SnapshotStore, data_dir: Path | None) -> None:
+    """Fill resolution gaps from the public pages for resolved/closed-but-blank questions.
+
+    Candidates are the tracked questions whose *latest* snapshot has a status of
+    ``resolved`` or ``closed`` but no ``resolution`` — exactly the gap the API's
+    access tier leaves. Each is read from its public page, throttled to one page
+    per :data:`_WEB_THROTTLE_SECONDS` and hard-capped at :data:`_WEB_PAGE_CAP`
+    pages per run. Found outcomes are appended (with provenance) to the
+    web-resolution store; a page with no banner is counted as a miss, never
+    guessed. Prints a ``checked/found/failed`` summary line.
+    """
+    latest = store.latest_by_question()
+    candidates = [
+        snapshot
+        for snapshot in latest.values()
+        if snapshot.status.lower() in ("resolved", "closed") and snapshot.resolution is None
+    ]
+    candidates.sort(key=lambda s: s.post_id)
+
+    web_store = WebResolutionStore(_resolve_web_resolution_dir(data_dir))
+    loader = _build_web_page_loader()
+
+    found: list[WebResolution] = []
+    checked = 0
+    failed = 0
+    for snapshot in candidates:
+        if checked >= _WEB_PAGE_CAP:
+            break
+        if checked > 0:
+            _web_sleep(_WEB_THROTTLE_SECONDS)
+        checked += 1
+        try:
+            resolution = fetch_resolution(
+                snapshot.post_id,
+                page_loader=loader,
+                question_id=snapshot.question_id,
+            )
+        except Exception as exc:
+            # One bad page (browser crash, navigation error) must not sink the run.
+            failed += 1
+            typer.echo(
+                f"q{snapshot.question_id} (post {snapshot.post_id}): web-resolution FAILED ({exc})",
+                err=True,
+            )
+            continue
+        if resolution is None:
+            failed += 1
+            continue
+        found.append(resolution)
+
+    web_store.append(found)
+    typer.echo(f"update-resolutions (web): checked={checked} found={len(found)} failed={failed}")
 
 
 @app.command()
@@ -1090,8 +1209,14 @@ def experiment_status(
 
     latest = snap_store.latest_by_question()
     records = list(fc_store.iter_all())
+
+    # Web-resolution overlay: outcomes read off the public pages fill any gap the
+    # API left (an API resolution always wins; see resolutions_from_store).
+    web_store = WebResolutionStore(_resolve_web_resolution_dir(data_dir))
+    web_overlay = {qid: wr.resolution for qid, wr in web_store.latest_by_question().items()}
+
     for manifest in manifests:
-        resolutions = resolutions_from_store(latest, manifest.question_ids)
+        resolutions = resolutions_from_store(latest, manifest.question_ids, web_overlay)
         status = compute_status(manifest, records, resolutions)
         _echo_experiment_status(status)
 
