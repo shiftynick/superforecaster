@@ -20,3 +20,4 @@ Thumbs.db
 
 # scraped forecast data (local, append-only)
 data/
+.claude/worktrees/
