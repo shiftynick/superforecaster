@@ -119,7 +119,13 @@ STRUCTURAL LIMITS (a tree exceeding them will be pruned):
 
 Keep the tree SHALLOW and HONEST. If the question does not usefully decompose,
 return a SINGLE leaf node — that is a legitimate answer. Prefer fewer, sturdier
-sub-questions over a sprawling tree of guesses."""
+sub-questions over a sprawling tree of guesses.
+
+CRITICAL: every leaf question's wording must stay consistent with the ROOT
+question's resolution criteria and fine print — carry the exact time windows,
+resolution sources, and edge-case rules into the leaf wording. A leaf that
+silently widens a time window or swaps the resolution source answers a different
+question and poisons the whole tree."""
 
 # Appended so the decomposer ends with a machine-readable tree. Mirrors the
 # forecaster's OUTPUT_FORMAT convention: prose first, then one JSON object.
@@ -438,15 +444,25 @@ def _estimate_leaf(
 def _leaf_snapshot(snapshot: QuestionSnapshot, question: str) -> QuestionSnapshot:
     """A derived snapshot posing the leaf sub-question, not the original question.
 
-    The leaf's ``question`` is self-contained plain wording, so the original
-    resolution criteria / description / fine print (which are about the *root*
-    question) are cleared to avoid answering the wrong thing. Ids and dates are
-    kept so the trace stays attributable to the same question.
+    The leaf's ``question`` is self-contained plain wording, but the ROOT
+    question's resolution criteria and fine print stay attached as labeled
+    context: they define the time windows, sources, and edge cases the leaf's
+    wording must be interpreted under. P1 falsified the earlier "blank them"
+    approach — a Bitcoin leaf answered "did BTC *ever* trade above $120k" at 0.99
+    because it never saw the root's window definition (docs/reviews/
+    forecast-43507.html). Ids and dates are kept so the trace stays attributable.
     """
+    root_context = (
+        f"This sub-question is one node in a decomposition of the root question: "
+        f"{snapshot.title!r}. Interpret time windows, sources, and edge cases in "
+        f"your sub-question consistently with the ROOT question's resolution "
+        f"criteria below.\n\nROOT resolution criteria: {snapshot.resolution_criteria}"
+        + (f"\n\nROOT fine print: {snapshot.fine_print}" if snapshot.fine_print else "")
+    )
     return snapshot.model_copy(
         update={
             "title": question,
-            "description": "",
+            "description": root_context,
             "resolution_criteria": "",
             "fine_print": "",
         }

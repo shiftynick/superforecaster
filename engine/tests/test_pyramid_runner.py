@@ -354,3 +354,16 @@ def test_blind_run_has_no_bundle_anywhere(_pin_settings: None) -> None:
     for call in leaf.calls:
         prompt = call["prompt"]
         assert isinstance(prompt, str) and "SOURCES" not in prompt
+
+
+def test_leaf_snapshot_carries_root_resolution_context() -> None:
+    """P1 regression: leaves must see the root's resolution criteria as context."""
+    from superforecaster.pyramid_runner import _leaf_snapshot
+
+    root = _snapshot()
+    leaf = _leaf_snapshot(root, "Did the price ever exceed the threshold?")
+    assert leaf.title == "Did the price ever exceed the threshold?"
+    assert root.resolution_criteria in leaf.description
+    assert "ROOT" in leaf.description
+    # The root criteria travel as labeled context, not as the leaf's own criteria.
+    assert leaf.resolution_criteria == ""
