@@ -55,26 +55,48 @@ footer { color: var(--muted); font-size: 0.8rem; margin-top: 2rem;
 <body>
 <main>
 <h1>Will Bitcoin trade above $120,000 before August 1, 2026?</h1>
-<p class="sub">Question 43507 · post 43502 · decomposition pyramid (candidate C) · 2026-07-12T23:57:32.259618+00:00</p>
+<p class="sub">Question 43507 · post 43502 · decomposition pyramid (candidate C) · 2026-07-16T12:32:51.788341+00:00</p>
 <div class="headline">
-<div class="stat"><div class="label">Structural</div><div class="value">99%</div></div>
+<div class="stat"><div class="label">Structural</div><div class="value">6%</div></div>
 <div class="stat"><div class="label">Holistic</div><div class="value">2%</div></div>
-<div class="stat"><div class="label">Blended (final)</div><div class="value">59%</div></div>
-<div class="stat"><div class="label">Confidence</div><div class="value">low</div></div>
+<div class="stat"><div class="label">Blended (final)</div><div class="value">3%</div></div>
+<div class="stat"><div class="label">Confidence</div><div class="value">medium</div></div>
 </div>
 <h2>How the final number was formed</h2>
-<p class="meta">The <strong>structural</strong> estimate (99%) comes from combining the leaf estimates up the tree. The <strong>holistic</strong> estimate (2%) is one direct forecast of the whole question. The final <strong>blended</strong> number (59%) is a log-odds blend of the two, weighting the holistic estimate 0.50.</p>
+<p class="meta">The <strong>structural</strong> estimate (6%) comes from combining the leaf estimates up the tree. The <strong>holistic</strong> estimate (2%) is one direct forecast of the whole question. The final <strong>blended</strong> number (3%) is a log-odds blend of the two, weighting the holistic estimate 0.50.</p>
 <h2>Confidence signals</h2>
-<p class="meta">Reported confidence <strong>low</strong> is the more cautious of two raw signals (both provisional):</p><ul><li>Weakest leaf confidence on a multiplied path: <strong>high</strong></li><li>Structural-vs-holistic disagreement (log-odds gap): <strong>8.49</strong> (smaller = the two agree more)</li></ul>
+<p class="meta">Reported confidence <strong>medium</strong> is the more cautious of two raw signals (both provisional):</p><ul><li>Weakest leaf confidence on a multiplied path: <strong>high</strong></li><li>Structural-vs-holistic disagreement (log-odds gap): <strong>1.12</strong> (smaller = the two agree more)</li></ul>
 <h2>The argument tree</h2>
+<div class="node">
+<p class="q">Will CoinMarketCap&#x27;s Bitcoin historical-data daily High value exceed $120,000 USD at least once during the eligible window from the question opening time (2026-05-16T21:54:52+00:00) until before the scheduled close time (2026-08-01T00:00:00+00:00)?</p>
+<p class="meta"><span class="badge op">disjunction</span></p>
+<p class="math">disjunction: inputs [0.010, 0.010] → clipped [0.030, 0.030] → <strong>0.059</strong></p>
+<div class="children">
 <div class="node leaf">
-<p class="q">Did CoinMarketCap&#x27;s Bitcoin historical daily High values record a price strictly above $120,000 at any time before August 1, 2026?</p>
+<p class="q">Did CoinMarketCap&#x27;s Bitcoin historical-data daily High values exceed $120,000 USD on any eligible day from 2026-05-16T21:54:52+00:00 through 2026-07-16?</p>
 <p class="meta"><span class="badge evidence">evidence</span> 
-<span class="prob"><strong>99%</strong></span> · confidence high</p>
-<p class="meta">Anchor / reference class: Bitcoin historical price milestones already achieved</p>
-<p class="rationale">The question asks whether CoinMarketCap&#x27;s Bitcoin daily High ever exceeded $120,000 before August 1, 2026. Multiple independent sources confirm Bitcoin already traded well above $120,000 in 2025. [S7] (Investopedia) states Bitcoin reached an all-time high of $126,198 in October 2025. [S17] (TradingKey) describes Bitcoin breaking above $120,000 on July 14, 2025 (~$123,000), surging to $124,000 in August 2025, and hitting $126,000 on October 6, 2025. [S19] records a 52-week high of $125,740 on June 10, 2025 for Coinbase Wrapped BTC. [S32] confirms Bitcoin reached a new ATH above $126,000 in 2025. Since today is July 12, 2026, these events have already occurred well before the August 1, 2026 deadline. Bitcoin is now trading around $63,000-64,000, but the historical record clearly includes prices above $120,000. The only residual uncertainty is whether CoinMarketCap specifically (vs. other aggregators) recorded a daily High above $120,000, but given the breadth of sources confirming the price across exchanges, CoinMarketCap&#x27;s data would certainly reflect this. This is essentially a settled historical question.</p>
+<span class="prob"><strong>1%</strong></span> · confidence high</p>
+<p class="meta">Anchor / reference class: Asset reaching a threshold roughly 2x current price during a bear market decline</p>
+<p class="rationale">The eligible window runs from May 16 to July 16, 2026. Multiple independent sources consistently show BTC trading between ~$58K and ~$81K during this entire period. BTC peaked at ~$126K in October 2025 and has been in a sustained bear market since. In mid-May 2026, BTC was ~$77-81K [S35, S38]; through June it fell from ~$73K to ~$58K [S6, S37]; and in July it ranged $58K-$65.5K [S5, S7, S10, S17, S19, S20]. The highest reported price during the entire window was ~$81K (mid-May) and ~$65.5K (mid-July), both far below $120K. The probability of any daily High exceeding $120K is effectively zero, with 1% reserved for data quality uncertainty.</p>
 </div>
-<footer>Model pyramid-c · dry run · cost $0.0986 · 69659 tokens · search credits 4</footer>
+<div class="node leaf">
+<p class="q">Given CoinMarketCap&#x27;s Bitcoin historical-data daily High values did not exceed $120,000 USD earlier in the eligible window, will a CoinMarketCap Bitcoin daily High exceed $120,000 USD between 2026-07-17 and before 2026-08-01T00:00:00+00:00?</p>
+<p class="meta"><span class="badge evidence">evidence</span> 
+<span class="prob"><strong>1%</strong></span> · confidence high</p>
+<p class="meta">Anchor / reference class: Bitcoin 2-week rallies of 80%+ at large market cap</p>
+<p class="rationale">The question asks whether any CoinMarketCap Bitcoin daily High will exceed $120,000 between July 17 and July 31, 2026, given that no daily High has exceeded $120,000 earlier in the eligible window (since May 16, 2026).
+
+As of July 16, 2026, multiple sources confirm Bitcoin is trading around $64,000–$65,500 [S2, S5, S11, S17, S19, S20]. Bitcoin&#x27;s ATH was ~$126,149 in October 2025 [S2, S4, S20], and the coin has since fallen ~46–49%. The eligible window has been open since May 16, and the question stipulates no daily High has exceeded $120,000 in that period.
+
+To resolve YES, Bitcoin must rise from ~$65,000 to above $120,000—a gain of approximately 85%—within about 15 days. At a market cap of ~$1.3 trillion, this would require roughly $1 trillion in additional value creation in two weeks. Bitcoin&#x27;s largest historical 2-week rallies (e.g., December 2017) occurred at far smaller market caps and during parabolic bull phases. The current environment is a bear market: price is below SMA90 (~$70,000) and SMA200 (~$73,500) [S2, S20], ETFs saw major outflows in June 2026 [S6, S37], geopolitical tensions with Iran persist [S12, S19, S23], and even the most optimistic near-term technical targets from sources are $67,000–$72,000 [S2, S13, S22]. No analyst or source suggests a path to $120,000 in this timeframe.
+
+Reference class: Bitcoin 2-week price movements requiring 80%+ gains at large market cap. Historically, such moves are essentially unprecedented at this scale. I estimate a base rate well below 1%.
+
+Strongest counterargument: Bitcoin is famously volatile, and a black-swan catalyst (massive sovereign adoption, surprise Fed emergency cut, regulatory breakthrough) could theoretically trigger an explosive short-squeeze cascade. However, even Bitcoin&#x27;s most extreme 2-week rallies at lower market caps peaked around 40–60%, and current bearish conditions and lack of any visible catalyst make an 85% move essentially impossible. I assign 0.2% to account for tail risk only.</p>
+</div>
+</div>
+</div>
+<footer>Model pyramid-c · dry run · cost $0.2039 · 108664 tokens · search credits 0</footer>
 </main>
 </body>
 </html>

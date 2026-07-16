@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forecast — question 43852</title>
+<style>:root {
+  --ink: #1c1c1c; --muted: #5a5a5a; --line: #d9d9d9; --bg: #ffffff;
+  --card: #fafafa; --accent: #2b5b84; --warn: #8a4b08; --evidence: #1f6f43;
+  --model: #6a3fa0;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  color: var(--ink); background: var(--bg); margin: 0; padding: 2rem;
+  line-height: 1.5;
+}
+main { max-width: 900px; margin: 0 auto; }
+h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
+h2 { font-size: 1.05rem; margin: 1.75rem 0 0.6rem; border-bottom: 1px solid var(--line);
+     padding-bottom: 0.25rem; }
+.sub { color: var(--muted); font-size: 0.9rem; margin: 0 0 1rem; }
+.headline { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1rem 0; }
+.stat { border: 1px solid var(--line); border-radius: 6px; padding: 0.6rem 0.9rem;
+        background: var(--card); min-width: 8rem; }
+.stat .label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase;
+               letter-spacing: 0.03em; }
+.stat .value { font-size: 1.3rem; font-weight: 600; }
+.badge { display: inline-block; font-size: 0.72rem; font-weight: 600; padding: 0.1rem 0.45rem;
+         border-radius: 4px; border: 1px solid var(--line); text-transform: uppercase;
+         letter-spacing: 0.03em; }
+.badge.evidence { color: var(--evidence); border-color: var(--evidence); }
+.badge.model-knowledge { color: var(--model); border-color: var(--model); }
+.badge.op { color: var(--accent); border-color: var(--accent); }
+.badge.failed { color: #b00020; border-color: #b00020; }
+.node { border: 1px solid var(--line); border-left: 3px solid var(--accent);
+        border-radius: 6px; padding: 0.75rem 0.9rem; margin: 0.6rem 0; background: var(--card); }
+.node.leaf { border-left-color: var(--evidence); }
+.node .q { font-weight: 600; margin: 0 0 0.35rem; }
+.node .meta { color: var(--muted); font-size: 0.85rem; margin: 0.2rem 0; }
+.node .rationale { font-size: 0.9rem; white-space: pre-wrap; margin: 0.4rem 0 0;
+                   color: #333; }
+.children { margin-left: 1.1rem; margin-top: 0.5rem; }
+.math { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.85rem;
+        background: #f0f0f0; border-radius: 4px; padding: 0.35rem 0.5rem; margin: 0.4rem 0 0; }
+.note { color: var(--warn); font-size: 0.88rem; margin: 0.25rem 0; }
+ul.notes { margin: 0.3rem 0; padding-left: 1.2rem; }
+.member { border: 1px solid var(--line); border-radius: 6px; padding: 0.5rem 0.75rem;
+          margin: 0.4rem 0; background: var(--card); font-size: 0.9rem; }
+.prob { font-variant-numeric: tabular-nums; }
+footer { color: var(--muted); font-size: 0.8rem; margin-top: 2rem;
+         border-top: 1px solid var(--line); padding-top: 0.6rem; }
+</style>
+</head>
+<body>
+<main>
+<h1>Will Iceland vote Yes in the 2026 EU negotiations referendum?</h1>
+<p class="sub">Question 43852 · post 43822 · decomposition pyramid (candidate C) · 2026-07-16T12:34:51.974740+00:00</p>
+<div class="headline">
+<div class="stat"><div class="label">Structural</div><div class="value">52%</div></div>
+<div class="stat"><div class="label">Holistic</div><div class="value">48%</div></div>
+<div class="stat"><div class="label">Blended (final)</div><div class="value">50%</div></div>
+<div class="stat"><div class="label">Confidence</div><div class="value">medium</div></div>
+</div>
+<h2>How the final number was formed</h2>
+<p class="meta">The <strong>structural</strong> estimate (52%) comes from combining the leaf estimates up the tree. The <strong>holistic</strong> estimate (48%) is one direct forecast of the whole question. The final <strong>blended</strong> number (50%) is a log-odds blend of the two, weighting the holistic estimate 0.50.</p>
+<h2>Confidence signals</h2>
+<p class="meta">Reported confidence <strong>medium</strong> is the more cautious of two raw signals (both provisional):</p><ul><li>Weakest leaf confidence on a multiplied path: <strong>medium</strong></li><li>Structural-vs-holistic disagreement (log-odds gap): <strong>0.17</strong> (smaller = the two agree more)</li></ul>
+<h2>The argument tree</h2>
+<div class="node">
+<p class="q">Will Já. (Yes.) receive the most votes in Iceland&#x27;s 2026 referendum on whether to resume accession negotiations with the European Union?</p>
+<p class="meta"><span class="badge op">conditional</span></p>
+<p class="math">conditional: inputs [0.900, 0.580] → clipped [0.900, 0.580] → <strong>0.522</strong></p>
+<div class="children">
+<div class="node leaf">
+<p class="q">Will the 2026 referendum on whether Iceland should resume accession negotiations with the European Union be held, with a result available before September 4, 2026, rather than being postponed or otherwise annulled under the question&#x27;s fine print?</p>
+<p class="meta"><span class="badge evidence">evidence</span> 
+<span class="prob"><strong>90%</strong></span> · confidence medium</p>
+<p class="meta">Anchor / reference class: Scheduled national referendums in stable developed democracies</p>
+<p class="rationale">**1. Question restated:** This sub-question asks whether Iceland&#x27;s EU accession negotiations referendum will actually be held and produce a result before September 4, 2026 — i.e., whether it proceeds as scheduled on August 29, 2026, rather than being postponed or annulled. It is NOT asking about the outcome (Yes/No), only whether the vote happens on time.
+
+**2. Reference class and base rate:** National referendums in stable developed democracies that have been formally scheduled and approved by parliament. In this reference class, postponement or annulment after formal parliamentary approval is rare — perhaps 5–15% of the time, typically only due to government collapse, major national emergencies, or successful legal challenges. Base rate for the referendum going ahead: ~88–92%.
+
+**3. Specifics adjustment:** Multiple authoritative sources confirm the referendum is firmly scheduled for August 29, 2026. Iceland&#x27;s parliament formally voted to hold it [S18]. Wikipedia, the Konrad-Adenauer-Stiftung, RÚV, Reuters, and the Guardian all confirm the August 29 date [S9, S15, S26, S18, S10]. The EU Council has already signaled readiness [S17]. Polls show 57% support for holding the referendum, with even many EU opponents wanting the vote to occur [S6]. There is no indication in any source of a government crisis, legal challenge, or logistical problem that would delay the vote. Today is July 16, 2026 — only ~6 weeks before the vote, which is typically too late for major disruptions in a stable democracy. These specifics push slightly upward from the base rate.
+
+**4. Strongest counterargument:** The main risk is an unforeseen political crisis — a coalition government collapse or a late-stage legal challenge to the referendum question or process. Iceland&#x27;s coalition governments can be fragile, and if the government fell before August 29, the referendum could be delayed. Additionally, some sources [S7, S24] reference a &#x27;2027 referendum,&#x27; suggesting some confusion or earlier uncertainty about timing, though the most recent and authoritative sources consistently say August 29, 2026. This counterargument is weak given the parliamentary vote has already occurred and no crisis is reported, but it keeps me from going above ~92%.
+
+**5. Final estimate:** 90%. The referendum is firmly scheduled, parliament-approved, and widely expected. The probability of postponement or annulment is low but not negligible (~10%), accounting for tail risks of political instability or legal challenges in the remaining weeks.</p>
+</div>
+<div class="node leaf">
+<p class="q">Given that the referendum is held and its result is available before September 4, 2026, will Já. (Yes.) receive more votes than No in the August 29, 2026 referendum on whether Iceland should resume accession negotiations with the European Union?</p>
+<p class="meta"><span class="badge evidence">evidence</span> 
+<span class="prob"><strong>58%</strong></span> · confidence medium</p>
+<p class="meta">Anchor / reference class: European membership referendums with close pre-election polling</p>
+<p class="rationale">The question asks whether Já. (Yes) will receive more votes than No in the August 29, 2026 Icelandic referendum on resuming EU accession negotiations, conditioned on the referendum being held and results available before September 4, 2026. The question is specifically about the referendum on resuming negotiations (not full membership), which polling shows is more popular than membership itself. Key evidence: A June 2026 Maskína poll (S26, S27) shows 53.1% of decided voters support reopening negotiations vs 46.9% against; when including all respondents, 44.5% yes vs 39.4% no with 14.6% undecided. BMI/Fitch (S8) tentatively anticipates a yes outcome with 55% probability, citing security concerns. The referendum question is about negotiations, not membership, which is an easier ask. However, counterfactors: A March 2026 Gallup poll (S25) showed 40% support vs 47% opposition to EU membership; support for reopening talks is higher than for membership but the margin is thin. Iceland has a history of Euroscepticism, having abandoned talks in 2013. The </p>
+</div>
+</div>
+</div>
+<footer>Model pyramid-c · dry run · cost $0.2319 · 123600 tokens · search credits 0</footer>
+</main>
+</body>
+</html>
