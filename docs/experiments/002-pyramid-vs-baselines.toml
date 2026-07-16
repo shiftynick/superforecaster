@@ -1,0 +1,39 @@
+# Machine-readable manifest for experiment 002 — mirrors
+# 002-pyramid-vs-baselines.md EXACTLY. The markdown is the authoritative frozen
+# artifact; if the two disagree, this file is the bug.
+#
+# Arm matching follows the same contract as 001: a record belongs to an arm when
+# its `method` matches (and `model`, when pinned) and it was created on or after
+# `frozen`. Arm C-raw is NOT matched from records — it is scored at analysis
+# time from arm C's records' pyramid.structural_probability field.
+
+id = "002"
+title = "Candidate C pyramid vs. A and B (forward, frozen-context, three-arm)"
+status = "frozen"
+frozen = 2026-07-12
+budget_usd = 45.0
+asknews_credit_budget = 200
+
+# The 40 pinned question ids (soonest-resolving first), frozen 2026-07-12.
+question_ids = [
+    40795, 43716, 43507, 44373, 43892, 44422, 43873, 44011, 44017, 44256,
+    35710, 44139, 44698, 43852, 44248, 43854, 39432, 44562, 43522, 43506,
+    44250, 43737, 43432, 44832, 44014, 43738, 44634, 44423, 44406, 43908,
+    43882, 43870, 43732, 43503, 44702, 44701, 43510, 43360, 44547, 44415,
+]
+
+[arms.A]
+label = "single (baseline)"
+kind = "single"
+method = "checklist-a"
+model = "z-ai/glm-5.2"
+
+[arms.B]
+label = "ensemble"
+kind = "ensemble-pooled"
+method = "ensemble-b"
+
+[arms.C]
+label = "pyramid"
+kind = "pyramid"
+method = "pyramid-c"

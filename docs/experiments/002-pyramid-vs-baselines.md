@@ -1,9 +1,9 @@
 # 002 — Candidate C pyramid vs. A and B (forward, frozen-context, three-arm)
 
-- Status: draft (awaiting owner sign-off to freeze — checkpoint P2)
+- Status: **frozen** (running)
 - Registered: 2026-07-12
-- Frozen: —
-- Owner sign-off: —
+- Frozen: 2026-07-12 (fresh scrape immediately prior; 54 eligible, first 40 pinned)
+- Owner sign-off: 2026-07-12 ("proceed - freeze 002 and spec C v2")
 
 ## Hypothesis
 
@@ -39,7 +39,15 @@ fresh runs — experiment 001's arm A/B records are NOT reused (they were foreca
   decomposition itself does. The multi-node stratum is the real test of the founding
   idea; the single-leaf rate is itself a registered result.
 - Leakage tier: frozen-context forward (docs/02's strongest) — leakage-impossible.
-- Question ids: *(appended at freeze time)*.
+- Question ids (40, pinned 2026-07-12, soonest-resolving first; 35 overlap experiment
+  001's set — permitted by the selection rule, records distinguished by method+date):
+  40795, 43716, 43507, 44373, 43892, 44422, 43873, 44011, 44017, 44256,
+  35710, 44139, 44698, 43852, 44248, 43854, 39432, 44562, 43522, 43506,
+  44250, 43737, 43432, 44832, 44014, 43738, 44634, 44423, 44406, 43908,
+  43882, 43870, 43732, 43503, 44702, 44701, 43510, 43360, 44547, 44415.
+- Note (freeze): C-raw scoring reads `structural_probability` from arm C's records at
+  analysis time; the `experiment-status` tool gains that column as ordinary machinery
+  work (does not alter this design).
 
 ## Metric & decision rule
 
