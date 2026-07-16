@@ -328,3 +328,18 @@ def test_resolutions_from_store() -> None:
     latest = {1: _Snap("yes"), 2: _Snap(None)}
     out = resolutions_from_store(latest, [1, 2, 3])
     assert out == {1: "yes", 2: None, 3: None}
+
+
+def test_resolutions_from_store_web_overlay_precedence() -> None:
+    class _Snap:
+        def __init__(self, resolution: str | None) -> None:
+            self.resolution = resolution
+
+    # q1: API resolved -> API wins over any web value.
+    # q2: API blank but present in store -> web fills the gap.
+    # q3: absent from store -> web fills the gap.
+    # q4: no API, no web -> stays None.
+    latest = {1: _Snap("yes"), 2: _Snap(None)}
+    web_overlay = {1: "no", 2: "no", 3: "yes"}
+    out = resolutions_from_store(latest, [1, 2, 3, 4], web_overlay)
+    assert out == {1: "yes", 2: "no", 3: "yes", 4: None}

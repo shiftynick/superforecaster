@@ -50,6 +50,7 @@ _DEFAULT_SNAPSHOT_DIR = "./data/snapshots"
 _DEFAULT_FORECAST_DIR = "./data/forecasts"
 _DEFAULT_LIVE_TOURNAMENT = "summer-futureeval-2026"
 _DEFAULT_SANDBOX_TOURNAMENT = "bot-testing-area"
+_DEFAULT_WEB_RESOLUTION_DIR = "./data/web-resolutions"
 
 
 @dataclass(frozen=True)
@@ -194,10 +195,13 @@ class DataSettings:
     Attributes:
         snapshot_dir: Directory of question snapshots (the scraper's output).
         forecast_dir: Directory of forecast records.
+        web_resolution_dir: Directory of web-scraped resolution records (the
+            gap-filler that reads outcomes off the public Metaculus pages).
     """
 
     snapshot_dir: Path
     forecast_dir: Path
+    web_resolution_dir: Path = Path("./data/web-resolutions")
 
 
 @dataclass(frozen=True)
@@ -552,6 +556,9 @@ def load_settings(path: Path | None = None) -> Settings:
     data = DataSettings(
         snapshot_dir=Path(_str_field(data_table, "snapshot_dir", _DEFAULT_SNAPSHOT_DIR)),
         forecast_dir=Path(_str_field(data_table, "forecast_dir", _DEFAULT_FORECAST_DIR)),
+        web_resolution_dir=Path(
+            _str_field(data_table, "web_resolution_dir", _DEFAULT_WEB_RESOLUTION_DIR)
+        ),
     )
     tournament = TournamentSettings(
         live=_str_field(tournament_table, "live", _DEFAULT_LIVE_TOURNAMENT),

@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.116.0",
     "httpx>=0.28.1",
+    "playwright>=1.61.0",
     "pydantic>=2.13.4",
     "trafilatura>=2.1.0",
     "typer>=0.26.8",
