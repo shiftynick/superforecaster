@@ -39,9 +39,11 @@ from .aggregation import to_log_odds
 from .config import (
     EnsembleSettings,
     PyramidSettings,
+    RetrievalSettings,
     TaskModelConfig,
     load_ensemble_settings,
     load_pyramid_settings,
+    load_retrieval_settings,
     load_task_config,
 )
 from .forecaster import (
@@ -56,6 +58,8 @@ from .forecaster import (
 from .llm import LlmClient, LlmError, LlmResult, build_llm_client
 from .models import QuestionSnapshot
 from .pyramid import (
+    Assumption,
+    AssumptionStatus,
     PruneNote,
     PyramidNode,
     PyramidParseError,
@@ -65,6 +69,7 @@ from .pyramid import (
     parse_decomposition,
 )
 from .research import ResearchBundle
+from .search import SearchClient, SearchError, SearchResult
 
 # Same Metaculus-driven clamp the single pass and the ensemble apply: a stored
 # probability of exactly 0 or 1 is rejected, so the blended final is squeezed
@@ -110,6 +115,17 @@ Return a tree of nodes. Each node has:
     - "evidence": concerns current events and MUST be grounded in the provided
       research.
   Internal (non-leaf) nodes MUST NOT carry a grounding.
+- "assumptions": OPTIONAL list of the implicit, near-certain beliefs THIS node's
+  estimate silently rests on — the things you are quietly treating as true (for
+  example "the vote happens on schedule", "the agency measures what we think it
+  measures"). Each assumption is an object:
+    - "text": the assumption in plain, falsifiable words.
+    - "load_bearing": true if the node's estimate would change materially were
+      this assumption false, otherwise false.
+    - "verifiability": "researchable" if a web search could settle it now, or
+      "unverifiable" if it cannot be checked yet.
+  Surface EVERY assumption the estimate genuinely rests on — typically 1 to 4 —
+  but do NOT manufacture filler. Zero assumptions is a legitimate answer.
 - "children": the list of sub-nodes (empty for a leaf).
 
 STRUCTURAL LIMITS (a tree exceeding them will be pruned):
@@ -135,7 +151,9 @@ OUTPUT FORMAT
 Think first, then END your response with ONLY a single JSON object — the ROOT
 node — and nothing after it. You may wrap it in a ```json code fence. Every node
 must have "id", "question", "node_type", and "children"; every leaf must also
-have "grounding". Output nothing after the closing brace."""
+have "grounding". A node may include an "assumptions" list (objects with "text",
+"load_bearing", "verifiability"); omit it when the node rests on none. Output
+nothing after the closing brace."""
 
 
 class _CallCost:
@@ -173,6 +191,7 @@ def run_pyramid_forecast(
     settings: PyramidSettings | None = None,
     ensemble_settings: EnsembleSettings | None = None,
     research: ResearchBundle | None = None,
+    search_client: SearchClient | None = None,
     client_factory: Callable[[TaskModelConfig], LlmClient] = build_llm_client,
     now: datetime | None = None,
 ) -> ForecastRecord:
@@ -193,6 +212,10 @@ def run_pyramid_forecast(
         research: The shared research bundle. Evidence leaves, the decomposer, and
             the holistic pass see it; model-knowledge leaves do not. ``None``
             forecasts blind throughout.
+        search_client: The search client the assumption-verification pass issues
+            its targeted retrievals through (one search per researchable
+            assumption). ``None`` disables verification: assumptions are still
+            surfaced and stored, but none are checked (they stay ``unverified``).
         client_factory: Test seam — builds an :class:`LlmClient` from a task's
             :class:`TaskModelConfig`. Defaults to :func:`build_llm_client` so each
             task (decompose / leaf / holistic) uses its own configured provider.
@@ -218,6 +241,13 @@ def run_pyramid_forecast(
         snapshot, pyr, research, client_factory(decompose_config), decompose_config, cost, notes
     )
 
+    # 1.5. Verify the researchable assumptions the tree rests on. Verified-false
+    # ones are injected into their owning leaf's estimation prompt below.
+    assumptions, verifications_run, verification_credits = _verify_assumptions(
+        tree, pyr, search_client, client_factory, cost, notes
+    )
+    falsified_by_node = _falsified_by_node(assumptions)
+
     # 2. Leaves.
     leaf_nodes = _collect_leaves(tree)
     leaf_estimates: list[LeafEstimate] = []
@@ -225,7 +255,15 @@ def run_pyramid_forecast(
     leaf_client = client_factory(leaf_config)
     for leaf in leaf_nodes:
         estimate = _estimate_leaf(
-            snapshot, leaf, research, leaf_client, leaf_config, moment, cost, notes
+            snapshot,
+            leaf,
+            research,
+            leaf_client,
+            leaf_config,
+            moment,
+            cost,
+            notes,
+            falsified=falsified_by_node.get(leaf.id, []),
         )
         leaf_estimates.append(estimate)
         leaf_probabilities[leaf.id] = estimate.probability
@@ -269,6 +307,9 @@ def run_pyramid_forecast(
         weakest_leaf_confidence=weakest_leaf,
         structural_holistic_gap=gap,
         decompose_failed=decompose_failed,
+        assumptions=assumptions,
+        assumption_verifications_run=verifications_run,
+        assumption_search_credits=verification_credits,
         notes=notes,
     )
 
@@ -289,7 +330,9 @@ def run_pyramid_forecast(
         dry_run=True,
         submitted_at=None,
         research=research,
-        research_search_credits=research.search_credits_used if research is not None else 0,
+        research_search_credits=(
+            (research.search_credits_used if research is not None else 0) + verification_credits
+        ),
         method="pyramid-c",
         frame=None,
         ensemble=None,
@@ -397,6 +440,8 @@ def _estimate_leaf(
     moment: datetime,
     cost: _CallCost,
     notes: list[str],
+    *,
+    falsified: list[Assumption],
 ) -> LeafEstimate:
     """Estimate one leaf via :func:`run_forecast_pass`, degrading on failure.
 
@@ -404,10 +449,16 @@ def _estimate_leaf(
     knowledge`` leaves get NONE (spec §2 — cheaper, and it keeps stable-fact
     estimates from being diluted by current-events sources). A leaf whose pass
     fails after its own retry becomes a ``0.5`` / ``"low"`` fallback with a note.
+
+    ``falsified`` are this leaf's own assumptions that verification found FALSE;
+    when present, they are injected prominently into the estimation prompt (via
+    ``run_forecast_pass``'s ``system_addendum`` seam) so the leaf reasons with the
+    corrected facts rather than the wrong hidden guess (spec §4).
     """
     grounding = leaf.grounding if leaf.grounding is not None else "evidence"
     leaf_research = research if grounding == "evidence" else None
     leaf_snapshot = _leaf_snapshot(snapshot, leaf.question)
+    addendum = _falsified_addendum(falsified) if falsified else None
     try:
         record = run_forecast_pass(
             leaf_snapshot,
@@ -415,6 +466,7 @@ def _estimate_leaf(
             config=config,
             research=leaf_research,
             now=moment,
+            system_addendum=addendum,
         )
     except LlmError as exc:
         notes.append(f"leaf {leaf.id!r} failed ({exc}); degraded to p=0.5 confidence=low")
@@ -496,6 +548,301 @@ def _holistic(
         return None
     cost.add_record(record)
     return record.probability
+
+
+# --- Assumption verification --------------------------------------------------
+
+# The verdict system prompt: read one search result set and vote on whether it
+# verifies, falsifies, or fails to settle a single factual assumption. Cheap by
+# design — it reads evidence and returns a small JSON object, nothing more.
+VERDICT_SYSTEM = """\
+You are fact-checking a single ASSUMPTION that a forecast silently relies on.
+You are given the assumption and a few search results gathered for it. Decide,
+using ONLY the results, which verdict fits:
+- "verified-true": the results clearly SUPPORT the assumption.
+- "verified-false": the results clearly CONTRADICT the assumption.
+- "unverified": the results do not settle it (absent, off-topic, or mixed).
+
+Be conservative: only claim verified-true / verified-false when the evidence is
+clear. When in doubt, answer "unverified".
+
+Return ONLY a single JSON object of exactly this form, nothing else:
+{"verdict": "verified-true" | "verified-false" | "unverified",
+ "evidence": "one short line citing what settled it, or why it could not be"}"""
+
+# Advisory schema for providers with server-side structured output; the Claude
+# CLI ignores it and we fall back to prompt-JSON extraction + validation.
+_VERDICT_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "verdict": {
+            "type": "string",
+            "enum": ["verified-true", "verified-false", "unverified"],
+        },
+        "evidence": {"type": "string"},
+    },
+    "required": ["verdict", "evidence"],
+}
+
+_VALID_VERDICTS: frozenset[str] = frozenset({"verified-true", "verified-false", "unverified"})
+
+
+def _verify_assumptions(
+    tree: PyramidNode,
+    settings: PyramidSettings,
+    search_client: SearchClient | None,
+    client_factory: Callable[[TaskModelConfig], LlmClient],
+    cost: _CallCost,
+    notes: list[str],
+) -> tuple[list[Assumption], int, int]:
+    """Verify the tree's researchable assumptions; return ``(all, run, credits)``.
+
+    Collects every assumption across the tree (filling each ``node_id``), selects
+    the researchable ones — deduped by normalized text, load-bearing first then
+    tree order, capped at ``max_assumption_verifications`` — and, for each, issues
+    ONE search plus one cheap verdict call. The verdict flips the assumption's
+    ``status``/``evidence`` in place; a duplicate assumption elsewhere in the tree
+    inherits the verdict. Every failure (no search client, a search error, a bad
+    verdict call) degrades that assumption to ``unverified`` with a trace note and
+    never raises.
+
+    Returns the full flat assumption list, how many were actually put through
+    verification, and the metered search credits the pass drew.
+    """
+    all_assumptions = _collect_assumptions(tree)
+    if not all_assumptions:
+        return [], 0, 0
+
+    researchable = [a for a in all_assumptions if a.verifiability == "researchable"]
+    to_verify = _select_assumptions_to_verify(researchable, settings.max_assumption_verifications)
+    if not to_verify:
+        return all_assumptions, 0, 0
+
+    if search_client is None:
+        notes.append(
+            f"assumption verification skipped: no search client available "
+            f"({len(to_verify)} researchable assumption(s) left unverified)"
+        )
+        return all_assumptions, 0, 0
+
+    retrieval = load_retrieval_settings()
+    verdict_config = _load_verdict_config()
+    verdict_client = client_factory(verdict_config)
+
+    credits_before = _search_credits(search_client)
+    for assumption in to_verify:
+        _verify_one(
+            assumption, search_client, verdict_client, verdict_config, retrieval, cost, notes
+        )
+    credits_after = _search_credits(search_client)
+    credits = _credit_delta(credits_before, credits_after)
+
+    _propagate_verdicts(all_assumptions, to_verify)
+    return all_assumptions, len(to_verify), credits
+
+
+def _verify_one(
+    assumption: Assumption,
+    search_client: SearchClient,
+    verdict_client: LlmClient,
+    config: TaskModelConfig,
+    retrieval: RetrievalSettings,
+    cost: _CallCost,
+    notes: list[str],
+) -> None:
+    """Run one assumption's search + verdict call, mutating it in place on success.
+
+    Degrades to ``unverified`` (with a note) on a search error, a failed verdict
+    call, or an unparseable verdict — the assumption is left as it was. The verdict
+    call's tokens/cost are always folded into the running total when the call was
+    made (even if its output could not be parsed).
+    """
+    try:
+        results = search_client.search(assumption.text, max_results=retrieval.max_results)
+    except SearchError as exc:
+        notes.append(
+            f"assumption verification search failed for {assumption.text!r} "
+            f"({exc}); left unverified"
+        )
+        return
+
+    try:
+        result = _run(
+            verdict_client,
+            VERDICT_SYSTEM,
+            _verdict_prompt(assumption, results),
+            config,
+            _VERDICT_SCHEMA,
+        )
+    except LlmError as exc:
+        notes.append(
+            f"assumption verdict call failed for {assumption.text!r} ({exc}); left unverified"
+        )
+        return
+    cost.add_call(result.input_tokens, result.output_tokens, result.cost_usd)
+
+    try:
+        status, evidence = _parse_verdict(result.text)
+    except (json.JSONDecodeError, ValueError, ValidationError) as exc:
+        notes.append(
+            f"assumption verdict did not parse for {assumption.text!r} ({exc}); left unverified"
+        )
+        return
+
+    assumption.status = status
+    assumption.evidence = evidence
+    if status == "verified-false":
+        notes.append(f"assumption verified FALSE: {assumption.text!r} — {evidence}")
+
+
+def _collect_assumptions(tree: PyramidNode) -> list[Assumption]:
+    """Every assumption across the tree, in pre-order, each with ``node_id`` filled.
+
+    Mutates each assumption's ``node_id`` to its owning node (they are the tree's
+    own assumption objects), so the flat list and the stored tree agree.
+    """
+    collected: list[Assumption] = []
+
+    def walk(node: PyramidNode) -> None:
+        for assumption in node.assumptions:
+            assumption.node_id = node.id
+            collected.append(assumption)
+        for child in node.children:
+            walk(child)
+
+    walk(tree)
+    return collected
+
+
+def _select_assumptions_to_verify(researchable: list[Assumption], cap: int) -> list[Assumption]:
+    """Dedupe by normalized text, order load-bearing first (then tree order), cap.
+
+    Surfacing assumptions is cheap but verifying them is not, so when the budget
+    binds the load-bearing researchable ones are checked first. Dedup keeps the
+    first occurrence (tree order), and the load-bearing-first sort is stable, so
+    ties preserve tree order.
+    """
+    deduped: list[Assumption] = []
+    seen: set[str] = set()
+    for assumption in researchable:
+        key = _normalize(assumption.text)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(assumption)
+    ordered = sorted(deduped, key=lambda a: not a.load_bearing)
+    return ordered[:cap]
+
+
+def _propagate_verdicts(all_assumptions: list[Assumption], verified: list[Assumption]) -> None:
+    """Copy each verified assumption's verdict onto its near-identical duplicates.
+
+    Verification checks one representative per normalized text; any other node
+    that rested on the same assumption inherits the verdict, so the flat trace is
+    coherent (no duplicate left spuriously ``unverified``).
+    """
+    by_norm = {_normalize(a.text): a for a in verified}
+    for assumption in all_assumptions:
+        representative = by_norm.get(_normalize(assumption.text))
+        if representative is not None and assumption is not representative:
+            assumption.status = representative.status
+            assumption.evidence = representative.evidence
+
+
+def _falsified_by_node(assumptions: list[Assumption]) -> dict[str, list[Assumption]]:
+    """Group the ``verified-false`` assumptions by their owning node id."""
+    grouped: dict[str, list[Assumption]] = {}
+    for assumption in assumptions:
+        if assumption.status == "verified-false":
+            grouped.setdefault(assumption.node_id, []).append(assumption)
+    return grouped
+
+
+def _falsified_addendum(falsified: list[Assumption]) -> str:
+    """The system-prompt section injecting a leaf's falsified assumptions (spec §4)."""
+    lines = [
+        "CORRECTED ASSUMPTIONS",
+        "",
+        "One or more assumptions this estimate might rest on have been checked "
+        "against evidence and found FALSE. Do NOT treat them as true — reason with "
+        "the corrected facts below:",
+    ]
+    for assumption in falsified:
+        evidence = assumption.evidence.strip() or "(no evidence detail)"
+        lines.append(f'- The assumption "{assumption.text}" is FALSE: {evidence}')
+    return "\n".join(lines)
+
+
+def _verdict_prompt(assumption: Assumption, results: list[SearchResult]) -> str:
+    """Build the verdict user message: the assumption plus the search results."""
+    return "\n\n".join(
+        [
+            f"ASSUMPTION TO CHECK:\n{assumption.text}",
+            _render_verdict_sources(results),
+            "Return the JSON verdict object now.",
+        ]
+    )
+
+
+def _render_verdict_sources(results: list[SearchResult]) -> str:
+    """Render a compact numbered source block for the verdict prompt."""
+    if not results:
+        return "SEARCH RESULTS:\n(no results returned)"
+    lines = ["SEARCH RESULTS:"]
+    for index, result in enumerate(results, start=1):
+        title = result.title.strip() or "(untitled)"
+        domain = result.source_domain or "unknown source"
+        when = result.published_at.date().isoformat() if result.published_at else "date unknown"
+        snippet = result.snippet.strip() or "(no snippet)"
+        lines.append(f"[S{index}] {title} ({domain}, {when})\n    {snippet}")
+    return "\n".join(lines)
+
+
+def _parse_verdict(text: str) -> tuple[AssumptionStatus, str]:
+    """Extract and validate the ``{verdict, evidence}`` object from a verdict reply.
+
+    Raises:
+        json.JSONDecodeError: No JSON object could be located in the reply.
+        ValueError: The JSON was the wrong shape or the verdict was not one of the
+            three allowed labels.
+    """
+    raw = json.loads(_extract_json_object(text))
+    if not isinstance(raw, dict):
+        raise ValueError("verdict JSON was not an object")
+    verdict = raw.get("verdict")
+    if not isinstance(verdict, str) or verdict not in _VALID_VERDICTS:
+        raise ValueError(f"verdict must be one of {sorted(_VALID_VERDICTS)}, got {verdict!r}")
+    evidence_raw = raw.get("evidence", "")
+    evidence = evidence_raw.strip() if isinstance(evidence_raw, str) else ""
+    # verdict is narrowed to the AssumptionStatus literal set by the check above.
+    return verdict, evidence  # type: ignore[return-value]
+
+
+def _search_credits(client: SearchClient) -> int | None:
+    """Read a metered search client's month-to-date credits, or ``None``.
+
+    Mirrors ``research._credits_used``: only a metered client (AskNews) exposes
+    ``credits_used_this_month``; an unmetered one (Tavily) returns ``None`` and the
+    pass records a zero draw for it.
+    """
+    getter = getattr(client, "credits_used_this_month", None)
+    if callable(getter):
+        try:
+            return int(getter())
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _credit_delta(before: int | None, after: int | None) -> int:
+    """The non-negative credit draw between two reads, or 0 if either is unknown."""
+    if before is None or after is None:
+        return 0
+    return max(0, after - before)
+
+
+def _normalize(text: str) -> str:
+    """Case- and whitespace-insensitive key for near-identical-assumption dedup."""
+    return " ".join(text.lower().split())
 
 
 # --- Confidence ---------------------------------------------------------------
@@ -622,6 +969,19 @@ def _load_holistic_config() -> TaskModelConfig:
     """
     try:
         return load_task_config("holistic")
+    except KeyError:
+        return load_task_config("forecast_pass")
+
+
+def _load_verdict_config() -> TaskModelConfig:
+    """The assumption-verdict config: ``[tasks.assumption_verdict]``, else forecast_pass.
+
+    Same fallback shape as :func:`_load_holistic_config`: ``load_task_config``
+    raises ``KeyError`` when the task table is absent, so we fall back to
+    ``[tasks.forecast_pass]`` — the spec's declared default for the verdict call.
+    """
+    try:
+        return load_task_config("assumption_verdict")
     except KeyError:
         return load_task_config("forecast_pass")
 

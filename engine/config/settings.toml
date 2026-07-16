@@ -92,6 +92,17 @@ model = "z-ai/glm-5.2"
 effort = "low"
 max_tokens = 16384
 
+# Assumption verdict for candidate C v2 (assumption verification): one CHEAP LLM
+# call that reads a single search result set and votes whether it verifies,
+# falsifies, or fails to settle one assumption a node's estimate rests on. It is a
+# fact-check vote, not a forecast — keep it small and low-effort. If this table is
+# omitted the verification pass falls back to [tasks.forecast_pass] automatically.
+# [tasks.assumption_verdict]
+# provider = "openrouter"
+# model = "z-ai/glm-5.2"
+# effort = "low"
+# max_tokens = 2048
+
 # Alternative: run the same task on the Codex subscription instead. Swap the
 # [tasks.forecast_pass] table above for this one (only one may be active).
 # Codex constrains its output to the forecast JSON Schema via --output-schema.
@@ -260,6 +271,14 @@ max_tokens = 16384
 #   combination_mode      : how internal nodes combine children. "guarded-product"
 #                           (v1, transparent + property-tested) or the reserved
 #                           "llm-synthesis" (a v2 hypothesis; not yet implemented).
+#   max_assumptions_per_node     : v2 runaway-output guard — a node's surfaced
+#                           assumption list is truncated to this many, with a prune
+#                           note. Default 8. Surfacing is cheap; this only stops
+#                           pathological output, it is NOT a target.
+#   max_assumption_verifications : v2 budget cap on how many researchable
+#                           assumptions are verified per question (one search + one
+#                           cheap verdict call each). Load-bearing researchable
+#                           assumptions are verified first. Default 6.
 #
 # [pyramid]
 # max_depth = 2
@@ -269,6 +288,8 @@ max_tokens = 16384
 # leaf_clip_high = 0.97
 # holistic_blend_weight = 0.5
 # combination_mode = "guarded-product"
+# max_assumptions_per_node = 8
+# max_assumption_verifications = 6
 
 [retrieval]
 news_provider = "asknews"
