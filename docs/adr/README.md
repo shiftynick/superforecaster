@@ -32,3 +32,4 @@ Commits implementing a decision reference its ADR number. Use the `new-adr` skil
 - [0002 — LLM calls via Claude Code CLI wrapper (subscription)](0002-llm-via-claude-cli.md) — accepted
 - [0003 — Multi-provider model layer: Claude CLI + Codex CLI, OpenRouter planned](0003-multi-provider-model-layer.md) — accepted
 - [0004 — Retrieval stack: AskNews + Tavily search, tiered local-first extraction](0004-retrieval-stack.md) — accepted
+- [0005 — Resolution access: public-page reader; no forecast submission yet](0005-resolution-access.md) — accepted
