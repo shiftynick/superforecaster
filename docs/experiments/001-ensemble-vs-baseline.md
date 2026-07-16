@@ -67,6 +67,18 @@ pipeline itself, which keeps accruing for a later confirmatory experiment at N �
 Max LLM spend: $40. Max AskNews credits: 250 (fresh bundles for ~N questions at ~4/question,
 within the 900/month cap alongside other work).
 
+## Amendment 2026-07-16 — scoring-integrity fix (not a design change)
+
+Forecast records now carry an `experiment_id` stamp (`forecast --experiment-id`), and
+scoring matches a record to a manifest's arms only when the record is stamped with that
+experiment's id or is unstamped (legacy). A backfill stamped the historical store:
+this experiment's July-10 records → `"001"`, experiment 002's July-12+ records → `"002"`.
+Why: 002 shares 35 pinned questions with this set and its arms reuse the same
+method/model values, so 002's later records were silently displacing this experiment's
+frozen forecasts under the old latest-matching-record rule. This experiment's arms are
+now scored on exactly its own July-10 records. Arms, question set, metric, and decision
+rule are unchanged.
+
 ## Results
 
 *(at completion)*

@@ -558,6 +558,16 @@ def forecast(
             "--no-research."
         ),
     ),
+    experiment_id: str | None = typer.Option(
+        None,
+        "--experiment-id",
+        help=(
+            "Stamp every record this run persists (single, pooled ensemble AND "
+            "members, pyramid) with this pre-registered experiment id (e.g. "
+            "'001'). Stamped records are scored ONLY by their own experiment's "
+            "manifest, so overlapping question sets never displace each other."
+        ),
+    ),
     data_dir: Path | None = _DataDirOption,
     forecast_dir: Path | None = _ForecastDirOption,
     post_id: list[int] = _PostIdOption,
@@ -659,7 +669,7 @@ def forecast(
                 )
                 if record is not None:
                     summaries.append(record)
-                fc_store.append(to_store)
+                fc_store.append(_stamped(to_store, experiment_id))
                 continue
 
             if ensemble_settings is not None:
@@ -676,7 +686,7 @@ def forecast(
                 )
                 if pooled is not None:
                     summaries.append(pooled)
-                fc_store.append(to_store)
+                fc_store.append(_stamped(to_store, experiment_id))
                 continue
 
             try:
@@ -693,7 +703,7 @@ def forecast(
                 # run drew none. Zero the record's draw so summaries and quota
                 # accounting never double-count a reused bundle.
                 record = record.model_copy(update={"research_search_credits": 0})
-            fc_store.append([record])
+            fc_store.append(_stamped([record], experiment_id))
             summaries.append(record)
             _echo_forecast_summary(record, research_state)
     finally:
@@ -707,12 +717,26 @@ def forecast(
         mode = "pyramid"
     else:
         mode = "blind" if no_research else "researched"
+    experiment_note = f" experiment={experiment_id}" if experiment_id is not None else ""
     typer.echo(
         f"forecast ({mode}): n={len(summaries)} failed={len(failures)} "
-        f"total_cost=${total_cost:.4f} search_credits={total_credits} (all dry-run)"
+        f"total_cost=${total_cost:.4f} search_credits={total_credits}"
+        f"{experiment_note} (all dry-run)"
     )
     if failures:
         raise typer.Exit(code=1)
+
+
+def _stamped(records: list[ForecastRecord], experiment_id: str | None) -> list[ForecastRecord]:
+    """Return the records stamped with the run's experiment id (no-op when ``None``).
+
+    Applied at every persist site of the ``forecast`` command, so a run made for
+    a pre-registered experiment marks EVERY record it stores — the single pass,
+    the pooled ensemble record and its members, and the pyramid record alike.
+    """
+    if experiment_id is None:
+        return records
+    return [record.model_copy(update={"experiment_id": experiment_id}) for record in records]
 
 
 def _forecast_ensemble_question(

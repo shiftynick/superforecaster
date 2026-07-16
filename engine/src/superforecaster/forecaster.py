@@ -238,6 +238,14 @@ class ForecastRecord(BaseModel):
     method: str = "checklist-a"
     frame: str | None = None
     ensemble: EnsembleDetail | None = None
+    # Experiment provenance. ``experiment_id`` names the pre-registered
+    # experiment (the manifest ``id``, e.g. ``"001"``) whose run produced this
+    # record — stamped by ``forecast --experiment-id``. ``None`` means the
+    # record was not made for any experiment (or predates stamping); scoring
+    # treats stamped records as belonging ONLY to their own experiment, so two
+    # frozen experiments sharing pinned questions can never displace each
+    # other's forecasts. Defaults so pre-stamping JSONL lines still parse.
+    experiment_id: str | None = None
     # Candidate C bookkeeping. ``pyramid`` carries the decomposition-pyramid
     # postmortem detail (the tree, leaf estimates, combination math, structural/
     # holistic/blend, and the two raw confidence signals) and is set ONLY on a

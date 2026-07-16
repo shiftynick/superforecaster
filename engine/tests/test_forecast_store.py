@@ -188,6 +188,35 @@ def test_old_jsonl_line_without_new_fields_parses(tmp_path: Path) -> None:
     assert loaded.ensemble is None
 
 
+def test_experiment_id_roundtrips(tmp_path: Path) -> None:
+    """A stamped record keeps its experiment_id; an unstamped one stays None."""
+    stamped = _record(1).model_copy(update={"experiment_id": "001"})
+    unstamped = _record(2)
+
+    store = ForecastStore(tmp_path)
+    store.append([stamped, unstamped])
+    loaded = {r.question_id: r for r in store.iter_all()}
+
+    assert loaded[1].experiment_id == "001"
+    assert loaded[2].experiment_id is None
+
+
+def test_old_jsonl_line_without_experiment_id_parses(tmp_path: Path) -> None:
+    """A pre-stamping JSONL line (no experiment_id key) loads with None."""
+    line = (
+        '{"created_at": "2026-07-09T12:00:00+00:00", "question_id": 7, '
+        '"post_id": 107, "title": "Legacy", "probability": 0.5, '
+        '"raw_probability": 0.5, "confidence": "medium", "rationale": "r", '
+        '"reference_class": "c", "model": "claude-sonnet-5", "input_tokens": 10, '
+        '"output_tokens": 5, "cost_usd": 0.01, "dry_run": true}'
+    )
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "2026-07-09.jsonl").write_text(line + "\n", encoding="utf-8")
+
+    (loaded,) = list(ForecastStore(tmp_path).iter_all())
+    assert loaded.experiment_id is None
+
+
 def test_empty_store(tmp_path: Path) -> None:
     store = ForecastStore(tmp_path / "nope")
     assert list(store.iter_all()) == []

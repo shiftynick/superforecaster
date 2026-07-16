@@ -218,9 +218,11 @@ def compute_status(
 ) -> ExperimentStatus:
     """Score an experiment's interim progress from records and resolutions.
 
-    Pure: no IO. Records outside the pinned set or made before the freeze date are
-    ignored. For each arm we track coverage, the true matched-record count, and
-    cost (known sum plus an unknown-cost tally). The paired Brier delta uses the
+    Pure: no IO. Records outside the pinned set, made before the freeze date, or
+    stamped with a DIFFERENT experiment's ``experiment_id`` are ignored (unstamped
+    records remain eligible for every manifest — the legacy matching). For each
+    arm we track coverage, the true matched-record count, and cost (known sum
+    plus an unknown-cost tally). The paired Brier delta uses the
     *latest* in-window record per arm per question (a re-run supersedes an earlier
     forecast) over questions that both arms forecast and that resolved yes/no.
 
@@ -236,6 +238,14 @@ def compute_status(
     """
     pinned = manifest.pinned
 
+    # Experiment provenance gate: a record stamped with ANOTHER experiment's id
+    # can never match this manifest's arms, even when its method/model/date all
+    # line up — two frozen experiments sharing pinned questions must not
+    # displace each other's forecasts. Unstamped (legacy) records keep the old
+    # method/model/date matching.
+    def _eligible(record: ForecastRecord) -> bool:
+        return record.experiment_id is None or record.experiment_id == manifest.id
+
     # Per arm: covered qids, record count, known-cost sum, unknown-cost tally, and
     # the latest in-window record per pinned question (for scoring).
     covered: dict[str, set[int]] = {arm.name: set() for arm in manifest.arms}
@@ -248,6 +258,8 @@ def compute_status(
         if record.question_id not in pinned:
             continue
         if not _in_window(record, manifest.frozen):
+            continue
+        if not _eligible(record):
             continue
         for arm in manifest.arms:
             if not arm.matches(record):

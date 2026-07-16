@@ -268,6 +268,73 @@ def test_forecast_smoke(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
     assert stored[0].research is None  # --no-research: blind control arm
 
 
+def test_forecast_experiment_id_stamps_single_record(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--experiment-id stamps the single-pass record and is echoed in the summary."""
+    snap_dir = tmp_path / "snapshots"
+    fc_dir = tmp_path / "forecasts"
+    _seed_open_question(monkeypatch, snap_dir)
+
+    monkeypatch.setattr(cli, "_build_llm_client", lambda: _FakeLlm())
+    _pass_cli_check(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "forecast",
+            "--no-research",
+            "--experiment-id",
+            "001",
+            "--data-dir",
+            str(snap_dir),
+            "--forecast-dir",
+            str(fc_dir),
+            "--closing-within-days",
+            "365",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "experiment=001" in result.output
+
+    from superforecaster.forecast_store import ForecastStore
+
+    (stored,) = list(ForecastStore(fc_dir).iter_all())
+    assert stored.experiment_id == "001"
+
+
+def test_forecast_without_experiment_id_leaves_records_unstamped(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    snap_dir = tmp_path / "snapshots"
+    fc_dir = tmp_path / "forecasts"
+    _seed_open_question(monkeypatch, snap_dir)
+
+    monkeypatch.setattr(cli, "_build_llm_client", lambda: _FakeLlm())
+    _pass_cli_check(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "forecast",
+            "--no-research",
+            "--data-dir",
+            str(snap_dir),
+            "--forecast-dir",
+            str(fc_dir),
+            "--closing-within-days",
+            "365",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "experiment=" not in result.output
+
+    from superforecaster.forecast_store import ForecastStore
+
+    (stored,) = list(ForecastStore(fc_dir).iter_all())
+    assert stored.experiment_id is None
+
+
 def test_forecast_with_research_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     snap_dir = tmp_path / "snapshots"
     fc_dir = tmp_path / "forecasts"
@@ -646,6 +713,8 @@ def test_forecast_ensemble_happy_path(monkeypatch: pytest.MonkeyPatch, tmp_path:
             "forecast",
             "--ensemble",
             "--no-research",
+            "--experiment-id",
+            "001",
             "--data-dir",
             str(snap_dir),
             "--forecast-dir",
@@ -657,6 +726,7 @@ def test_forecast_ensemble_happy_path(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert result.exit_code == 0, result.output
     # Log-odds of 0.4/0.5/0.6 average to 0 -> pooled 0.5 (fixed coeff 1.0).
     assert "p=0.50" in result.output
+    assert "experiment=001" in result.output
     assert "members=3ok/0failed" in result.output
     assert "ensemble" in result.output
     assert "n=1" in result.output
@@ -669,6 +739,8 @@ def test_forecast_ensemble_happy_path(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert len(members) == 3
     assert len(pooled) == 1
     assert {m.frame for m in members} == {"outside-first", "inside-first", "status-quo"}
+    # --experiment-id stamps the pooled record AND every member record.
+    assert all(r.experiment_id == "001" for r in stored)
     (p,) = pooled
     assert p.model == "ensemble-b"
     assert p.probability == pytest.approx(0.5)
@@ -894,6 +966,8 @@ def test_forecast_pyramid_happy_path(monkeypatch: pytest.MonkeyPatch, tmp_path: 
             "forecast",
             "--pyramid",
             "--no-research",
+            "--experiment-id",
+            "002",
             "--data-dir",
             str(snap_dir),
             "--forecast-dir",
@@ -904,6 +978,7 @@ def test_forecast_pyramid_happy_path(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     )
     assert result.exit_code == 0, result.output
     assert "pyramid" in result.output
+    assert "experiment=002" in result.output
     assert "structural=" in result.output
     assert "holistic=" in result.output
     assert "leaves=2" in result.output
@@ -915,6 +990,7 @@ def test_forecast_pyramid_happy_path(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert len(stored) == 1  # ONE record per pyramid question
     (rec,) = stored
     assert rec.method == "pyramid-c"
+    assert rec.experiment_id == "002"
     assert rec.pyramid is not None
     assert len(rec.pyramid.leaf_estimates) == 2
     # Decompose + 2 leaves + holistic = 4 calls x $0.01.

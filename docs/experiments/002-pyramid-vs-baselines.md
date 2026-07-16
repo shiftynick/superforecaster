@@ -70,6 +70,18 @@ forward records keep accruing for a later confirmatory pass at N ≥ 300.
 Max LLM spend: $45 (~$0.85/question across the three arms). Max AskNews credits: 200
 (bundles are shared across arms — ~4/question fresh). Hard stop at either cap.
 
+## Amendment 2026-07-16 — scoring-integrity fix (not a design change)
+
+Forecast records now carry an `experiment_id` stamp (`forecast --experiment-id`), and
+scoring matches a record to a manifest's arms only when the record is stamped with that
+experiment's id or is unstamped (legacy). A backfill stamped the historical store: this
+experiment's records (pinned questions, methods checklist-a / ensemble-b(-member) /
+pyramid-c, created on or after 2026-07-12) → `"002"`; experiment 001's July-10 records
+→ `"001"`. Why: under the old method/model+date matching, this experiment's later
+records were silently displacing 001's frozen forecasts in 001's scoring (35 pinned
+questions overlap). Future runs for this experiment must pass `--experiment-id 002`.
+Arms, question set, metric, and decision rule are unchanged.
+
 ## Results
 
 *(at completion)*

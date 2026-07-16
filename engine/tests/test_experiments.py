@@ -197,6 +197,40 @@ def test_ensemble_member_matches_neither_arm() -> None:
     assert all(a.coverage == 0 for a in status.arms)
 
 
+def test_record_stamped_with_other_experiment_is_excluded() -> None:
+    """A record stamped for another experiment never matches this manifest's arms."""
+    m = _manifest()  # id "001"
+    other = _arm_a(1).model_copy(update={"experiment_id": "002"})
+    status = compute_status(m, [other], {1: None})
+    assert all(a.coverage == 0 for a in status.arms)
+    assert all(a.matched_records == 0 for a in status.arms)
+
+
+def test_records_stamped_same_or_unstamped_are_included() -> None:
+    """Stamped-with-this-id and unstamped (legacy) records both stay eligible."""
+    m = _manifest()  # id "001"
+    same = _arm_a(1).model_copy(update={"experiment_id": "001"})
+    legacy = _arm_a(2)  # experiment_id None
+    status = compute_status(m, [same, legacy], {})
+    assert status.arms[0].covered_qids == frozenset({1, 2})
+    assert status.arms[0].matched_records == 2
+
+
+def test_stamped_other_record_does_not_displace_own_latest() -> None:
+    """The scoring-integrity bug: a later, other-experiment record with the same
+    method/model must not supersede this experiment's own forecast."""
+    m = _manifest((1,))
+    own = _arm_a(1, probability=0.9, created_at=ON).model_copy(update={"experiment_id": "001"})
+    intruder = _arm_a(1, probability=0.2, created_at=LATER).model_copy(
+        update={"experiment_id": "002"}
+    )
+    own_b = _arm_b(1, probability=0.5).model_copy(update={"experiment_id": "001"})
+    status = compute_status(m, [own, intruder, own_b], {1: "yes"})
+    (paired,) = status.paired
+    # Arm A must be scored on ITS 0.9, not the intruder's later 0.2.
+    assert paired.brier_a == pytest.approx((0.9 - 1.0) ** 2)
+
+
 # --- coverage & window -----------------------------------------------------
 
 
