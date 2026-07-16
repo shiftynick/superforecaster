@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V0 Review — Candidate C v2: Assumption Verification</title>
+<style>
+  :root {
+    --bg:#f6f7f9; --panel:#ffffff; --side:#18232b; --text:#1d2730; --muted:#63717d;
+    --line:#cfd8df; --blue:#1e6b96; --green:#35754b; --gold:#8a651d; --red:#a13f3f;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font:15px/1.55 "Segoe UI",system-ui,-apple-system,sans-serif; }
+  a { color:var(--blue); }
+  .wrap { display:flex; min-height:100vh; }
+  .side { width:270px; background:var(--side); color:#dce4ea; padding:20px 18px;
+    position:sticky; top:0; height:100vh; overflow-y:auto; flex-shrink:0; }
+  .side h1 { font-size:16px; margin:0 0 4px; color:#fff; }
+  .side .sub { font-size:12px; color:#9fb0bc; margin-bottom:16px; }
+  .side nav a { display:block; color:#c4d0d9; text-decoration:none; font-size:13px;
+    padding:5px 8px; border-radius:6px; margin-bottom:2px; }
+  .side nav a:hover { background:#243541; color:#fff; }
+  .side .actions { margin-top:18px; border-top:1px solid #2c3d4a; padding-top:14px; }
+  .side .actions button { display:block; width:100%; margin-bottom:8px;
+    background:#243541; color:#e4ecf2; border:1px solid #35495a; border-radius:6px;
+    padding:8px 10px; font-size:13px; cursor:pointer; text-align:left; }
+  .side .actions button:hover { background:#2e4354; }
+  .side .actions button.primary { background:var(--blue); border-color:var(--blue); color:#fff; }
+  #exportStatus { font-size:12px; color:#9fb0bc; min-height:18px; }
+  .main { flex:1; padding:26px 34px 80px; max-width:960px; }
+  .crumb { font-size:12px; color:var(--muted); margin-bottom:6px; }
+  h2.page { font-size:22px; margin:0 0 6px; }
+  .lede { color:var(--muted); max-width:760px; margin-bottom:24px; }
+  section.unit { background:var(--panel); border:1px solid var(--line); border-radius:8px;
+    padding:20px 22px; margin-bottom:22px; }
+  section.unit h3 { margin:0 0 2px; font-size:17px; }
+  .purpose { font-size:13px; color:var(--muted); margin-bottom:12px; }
+  .body p { margin:10px 0; }
+  .body ul { margin:8px 0; padding-left:22px; }
+  .body li { margin:4px 0; }
+  .tag { display:inline-block; font-size:11px; font-weight:600; border-radius:5px;
+    padding:2px 8px; margin-right:6px; vertical-align:middle; }
+  .tag.decision { background:#e8f0f6; color:var(--blue); }
+  .tag.risk { background:#f7ecec; color:var(--red); }
+  .tag.context { background:#eef2ee; color:var(--green); }
+  .tag.plan { background:#f6f0e2; color:var(--gold); }
+  .prompts { background:#f2f6f9; border:1px solid #dbe5ec; border-radius:6px;
+    padding:10px 14px; margin:14px 0 4px; }
+  .prompts b { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--blue); }
+  .prompts ul { margin:6px 0 0; padding-left:20px; }
+  .prompts li { font-size:13.5px; margin:3px 0; }
+  .anno { border-top:1px dashed var(--line); margin-top:16px; padding-top:12px; }
+  .anno .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
+  .anno label { font-size:12.5px; color:var(--muted); }
+  .anno select { border:1px solid var(--line); border-radius:6px; padding:5px 8px;
+    font-size:13px; background:#fff; color:var(--text); }
+  .anno textarea { width:100%; min-height:64px; border:1px solid var(--line); border-radius:6px;
+    padding:8px 10px; font:13.5px/1.5 inherit; resize:vertical; color:var(--text); }
+  .anno .meta { display:flex; justify-content:space-between; align-items:center; margin-top:6px; }
+  .anno .saved { font-size:11.5px; color:var(--muted); }
+  .anno button.clear { background:none; border:1px solid var(--line); border-radius:6px;
+    color:var(--muted); font-size:12px; padding:4px 10px; cursor:pointer; }
+  .anno button.clear:hover { color:var(--red); border-color:var(--red); }
+  .example { background:#fbfcfd; border:1px solid var(--line); border-radius:8px;
+    padding:14px 16px; margin:12px 0; }
+  .example b.cap { display:block; font-size:12px; text-transform:uppercase;
+    letter-spacing:.04em; color:var(--muted); margin-bottom:8px; }
+  .badge { display:inline-block; font-size:12px; font-weight:600; border-radius:10px;
+    padding:1px 9px; margin-right:4px; }
+  .badge.ok { background:#e7f0ea; color:var(--green); }
+  .badge.bad { background:#f7ecec; color:var(--red); }
+  .badge.open { background:#f0f2f4; color:var(--muted); }
+  table.mini { border-collapse:collapse; font-size:13.5px; margin:8px 0; }
+  table.mini th, table.mini td { border:1px solid var(--line); padding:5px 10px; text-align:left; }
+  table.mini th { background:#f2f5f7; font-weight:600; }
+  code { background:#f0f3f5; border-radius:4px; padding:1px 5px; font-size:13px; }
+  dialog { border:1px solid var(--line); border-radius:8px; max-width:720px; width:90%; }
+  dialog textarea { width:100%; min-height:320px; font:12.5px/1.5 Consolas,monospace; }
+  @media (max-width:820px) {
+    .wrap { flex-direction:column; }
+    .side { width:100%; height:auto; position:static; }
+    .main { padding:18px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <aside class="side">
+    <h1>Candidate C v2 — V0 Review</h1>
+    <div class="sub">Assumption verification spec · review mode · 2026-07-12</div>
+    <nav>
+      <a href="#u1">1 · What v2 adds &amp; why</a>
+      <a href="#u2">2 · The Assumption model</a>
+      <a href="#u3">3 · The verification pass</a>
+      <a href="#u4">4 · Verified-false handling</a>
+      <a href="#u5">5 · Coupling: confidence + pull</a>
+      <a href="#u6">6 · Per-leaf retrieval top-up</a>
+      <a href="#u7">7 · Badges &amp; the postmortem view</a>
+      <a href="#u8">8 · Cost &amp; config</a>
+      <a href="#u9">9 · Evidence plan &amp; non-goals</a>
+      <a href="#u10">10 · Checkpoints &amp; build plan</a>
+    </nav>
+    <div class="actions">
+      <button class="primary" id="copyBtn">Copy feedback markdown</button>
+      <button id="previewBtn">Preview markdown</button>
+      <button id="downloadBtn">Download markdown</button>
+      <button id="clearAllBtn">Clear all notes</button>
+      <div id="exportStatus" aria-live="polite"></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="crumb">docs/specs/decomposition-pyramid-v2.md · gate V0 (spec review before any code)</div>
+    <h2 class="page">Candidate C v2: assumption surfacing &amp; verification</h2>
+    <p class="lede">Your idea from today's granularity discussion, specced: every node
+      states what it's silently assuming, the checkable assumptions get verified with
+      targeted searches, and broken assumptions correct the forecast before it's made.
+      Mark each unit, note anything, copy the markdown back to chat. No code until this
+      comes back.</p>
+
+    <section class="unit" id="u1">
+      <h3><span class="tag context">context</span>What v2 adds — and why it beats deeper trees</h3>
+      <div class="purpose">The design principle that came out of today's discussion, made concrete.</div>
+      <div class="body">
+        <p>Decomposition earns its keep only while the children are <b>more knowable</b> than
+        the parent — depth for its own sake just multiplies noise. v2 adds granularity on a
+        different axis: every estimate silently rides on assumptions ("the referendum happens
+        as scheduled", "the source measures what we think"). v2 makes them explicit and
+        <b>verifies the checkable ones</b>. A verified assumption replaces a hidden guess with
+        a fact — the one form of added granularity that <i>reduces</i> error instead of
+        compounding it.</p>
+        <p>The P1 Bitcoin miss is the proof case: the forecast silently assumed the eligible
+        window covered all history. That assumption was checkable and false. We fixed it with
+        a prompt patch; v2 would catch that whole <i>class</i> structurally.</p>
+      </div>
+      <div class="prompts"><b>Review prompts</b><ul>
+        <li>Does this capture what you meant by "break down the nodes based on assumptions"?</li>
+      </ul></div>
+      <div class="anno" data-key="u1" data-title="What v2 adds & why"></div>
+    </section>
+
+    <section class="unit" id="u2">
+      <h3><span class="tag decision">decision</span>The Assumption model</h3>
+      <div class="purpose">What the decomposer must state for every node.</div>
+      <div class="body">
+        <p>Each node carries 0–3 assumptions, each with:</p>
+        <ul>
+          <li><b>text</b> — falsifiable plain wording ("the referendum is officially scheduled
+            before Sept 4").</li>
+          <li><b>load_bearing</b> — would the estimate change materially if this were false?</li>
+          <li><b>verifiability</b> — <code>researchable</code> (a search can settle it now) or
+            <code>unverifiable</code> (about the future / unknowable).</li>
+        </ul>
+        <p>Zero assumptions is a legitimate answer — the prompt forbids manufacturing filler.
+        At runtime each assumption gains a status: <span class="badge ok">verified ✓</span>
+        <span class="badge bad">falsified ✗</span> <span class="badge open">unverified ○</span>,
+        plus a one-line evidence citation.</p>
+      </div>
+      <div class="prompts"><b>Review prompts</b><ul>
+        <li>Is 0–3 assumptions per node the right budget, or should the root allow more?</li>
+      </ul></div>
+      <div class="anno" data-key="u2" data-title="The Assumption model"></div>
+    </section>
+
+    <section class="unit" id="u3">
+      <h3><span class="tag decision">decision</span>The verification pass</h3>
+      <div class="purpose">How checkable assumptions actually get checked.</div>
+      <div class="body">
+        <p>After decomposition, before any leaf is estimated: collect all
+        <code>researchable</code> assumptions across the tree (deduplicated), and for each run
+        <b>one targeted search + one cheap LLM verdict call</b> ("does this evidence verify,
+        falsify, or fail to settle it?"). Hard budget: <code>max_assumption_verifications</code>
+        per question (default 6), inside the existing per-question search caps. Failures
+        degrade to "unverified" with a trace note — never crash.</p>
+        <div class="example"><b class="cap">Worked example — Iceland referendum</b>
+          Node: "referendum held before Sept 4" · assumption: <i>"the referendum is officially
+          scheduled"</i> (load-bearing, researchable) → search finds the government decree with
+          a date → <span class="badge ok">verified ✓</span> → the leaf estimates from a fact,
+          not a guess about scheduling.
+        </div>
+      </div>
+      <div class="prompts"><b>Review prompts</b><ul>
+        <li>Is 6 verifications/question the right default cap? (Each ≈ 1 search credit + $0.01.)</li>
+        <li>OK that verification runs once, pre-estimation — no multi-round loops in v2?</li>
+      </ul></div>
+      <div class="anno" data-key="u3" data-title="The verification pass"></div>
+    </section>
+
+    <section class="unit" id="u4">
+      <h3><span class="tag decision">decision</span>Verified-false handling — the jackpot case</h3>
+      <div class="purpose">What happens when an assumption turns out to be wrong.</div>
+      <div class="body">
+        <p>A falsified assumption is injected <b>prominently into the owning node's estimation
+        prompt</b>: "NOTE: the assumption you might make — X — is FALSE: &lt;evidence&gt;." The
+        node then reasons from corrected facts. This is context injection, <i>not</i>
+        arithmetic — no automatic probability adjustment, because the right response to a
+        broken assumption depends on what broke.</p>
+        <p>Counterfactual: in the Bitcoin case, verification of "the window covers all of
+        history" would have returned FALSE (question opened May 2026), and the leaf would have
+        reasoned about a rally from the current price — which is exactly what it did after our
+        manual fix (0.99 → 0.06).</p>
+      </div>
+      <div class="prompts"><b>Review prompts</b><ul>
+        <li>Comfortable with context injection over automatic arithmetic here?</li>
+      </ul></div>
+      <div class="anno" data-key="u4" data-title="Verified-false handling"></div>
+    </section>
+
+    <section class="unit" id="u5">
+      <h3><span class="tag risk">risk</span><span class="tag decision">decision</span>Coupling: confidence caps + fragility pull — the key call</h3>
+      <div class="purpose">How UNVERIFIED assumptions affect the output. The most consequential unit on this page.</div>
+      <div class="body">
+        <p>Assumptions deliberately do <b>not</b> multiply into the combination math — that
+        would reinvent error compounding through the back door. Instead, two conservative
+        couplings:</p>
+        <ul>
+          <li><b>Confidence caps:</b> ≥2 unverified load-bearing assumptions on the record →
+            confidence capped at "low"; exactly 1 → capped at "medium". Raw counts always
+            stored.</li>
+          <li><b>Fragility pull</b> (the docs/03 graft, node-level): a node resting on ≥1
+            unverified load-bearing assumption has its estimate pulled toward its outside-view
+            base rate by <code>fragility_pull_weight</code> (default <b>0.15</b> in
+            <span title="Averaging in log-odds space — same math as the blend.">log-odds space</span>).
+            Weight 0.0 disables it, and the pull is recomputable from stored raw values — so
+            experiment 003 can score v2 with and without it from the same records, free.</li>
+        </ul>
+      </div>
+      <div class="prompts"><b>Review prompts</b><ul>
+        <li>Is 0.15 a sane default strength for the pull? (0 = off, higher = more skeptical of fragile nodes.)</li>
+        <li>Do the confidence caps (2→low, 1→medium) match your intuition?</li>
+      </ul></div>
+      <div class="anno" data-key="u5" data-title="Coupling: confidence caps + fragility pull"></div>
+    </section>
+
+    <section class="unit" id="u6">
+      <h3><span class="tag decision">decision</span>Per-leaf retrieval top-up</h3>
+      <div class="purpose">The v1 deferral comes due — leaves can get their own targeted search.</div>
+      <div class="body">
+        <p>An evidence leaf poorly covered by the shared bundle (no bundle source mentions its
+        key terms) gets ONE targeted search appended to its context. Shares the per-question
+        budget with assumption verification; <b>verification has priority</b>
+        (<code>leaf_topup_max_searches</code>, default 2). This was your P0 "revise" on v1's
+        shared-bundle-only design, now unlocked because assumption-checking needs the targeted
+        search machinery anyway.</p>
+      </div>
+      <div class="prompts"><b>Review prompts</b><ul>
+        <li>Right priority order (verification before leaf top-up) when the budget binds?</li>
+      </ul></div>
+      <div class="anno" data-key="u6" data-title="Per-leaf retrieval top-up"></div>
+    </section>
+
+    <section class="unit" id="u7">
+      <h3><span class="tag context">context</span>Badges &amp; the postmortem view</h3>
+      <div class="purpose">What you'll actually see in the rendered argument.</div>
+      <div class="body">
+        <p><code>render-forecast</code> shows every node's assumptions as
+        <span class="badge ok">verified ✓</span> <span class="badge bad">falsified ✗</span>
+        <span class="badge open">unverified ○</span> badges with their one-line evidence. When
+        a forecast eventually misses, "which assumption broke?" becomes a mechanical lookup —
+        the postmortem hook you asked for on day one, now structural.</p>
+      </div>
+      <div class="anno" data-key="u7" data-title="Badges & postmortem view"></div>
+    </section>
+
+    <section class="unit" id="u8">
+      <h3><span class="tag context">context</span>Cost &amp; config</h3>
+      <div class="purpose">What v2 adds to the bill and what you can tune.</div>
+      <div class="body">
+        <p>v1 (~$0.20/q) + up to 6 verdict calls (cheap model, ~$0.01 each) + ≤8 extra search
+        credits/question ≈ <b>$0.25–0.45/question</b> — still under the ensemble.</p>
+        <p>New knobs, all in <code>settings.toml [pyramid]</code>:
+        <code>max_assumption_verifications</code>, <code>leaf_topup_max_searches</code>,
+        <code>fragility_pull_weight</code>, the two confidence-cap counts, plus
+        <code>[tasks.assumption_verdict]</code> (its own model config).</p>
+      </div>
+      <div class="anno" data-key="u8" data-title="Cost & config"></div>
+    </section>
+
+    <section class="unit" id="u9">
+      <h3><span class="tag plan">plan</span>Evidence plan &amp; non-goals</h3>
+      <div class="purpose">How v2 earns its way in, and what it deliberately excludes.</div>
+      <div class="body">
+        <p><b>Experiment 003</b>: v2 vs v1, paired, same bundles — registered only after 002 is
+        underway. Primary: paired Brier delta. Secondaries: <b>verified-false catch rate</b>
+        (how often verification repairs a node — the direct measure of your idea's value),
+        fragility-pull on/off recomputation, cost delta. v1's shipped defaults change nothing
+        until 003 reports.</p>
+        <p><b>Not in v2:</b> cross-question assumption graphs (a shared world model);
+        recursively decomposing assumptions; assumptions as multiplied conjuncts;
+        multi-round verification loops.</p>
+      </div>
+      <div class="prompts"><b>Review prompts</b><ul>
+        <li>Is any non-goal here something you expected v2 to include?</li>
+      </ul></div>
+      <div class="anno" data-key="u9" data-title="Evidence plan & non-goals"></div>
+    </section>
+
+    <section class="unit" id="u10">
+      <h3><span class="tag plan">plan</span>Checkpoints &amp; build plan</h3>
+      <div class="purpose">Where you're in the loop.</div>
+      <div class="body">
+        <table class="mini">
+          <tr><th>Gate</th><th>What you see / decide</th></tr>
+          <tr><td><b>V0</b> (now)</td><td>This page — approve before any code</td></tr>
+          <tr><td><b>V1</b></td><td>2–3 questions with assumption badges in rendered graphs; you judge: "are these the assumptions a careful human would list?"</td></tr>
+          <tr><td><b>V2</b></td><td>Experiment 003 freeze — you sign; runs alongside 001/002</td></tr>
+        </table>
+        <p>Build: two Opus agents (schema+verification pass; coupling+render), Fable review
+        between and after — same pattern as v1, which surfaced and fixed three real defects
+        at review time.</p>
+      </div>
+      <div class="anno" data-key="u10" data-title="Checkpoints & build plan"></div>
+    </section>
+  </main>
+</div>
+
+<dialog id="previewDlg">
+  <h3 style="margin-top:0">Feedback markdown preview</h3>
+  <textarea id="previewText" readonly></textarea>
+  <div style="margin-top:10px; text-align:right">
+    <button id="closeDlg" style="padding:6px 14px">Close</button>
+  </div>
+</dialog>
+
+<script>
+(function () {
+  var STORE = "review-pyramid-v2-v0";
+  var STATUSES = ["", "agree", "agree with notes", "revise", "discuss", "blocker"];
+  var state = {};
+  try { state = JSON.parse(localStorage.getItem(STORE) || "{}"); } catch (e) { state = {}; }
+
+  function save() { localStorage.setItem(STORE, JSON.stringify(state)); }
+  function fmtTime(ts) { return ts ? new Date(ts).toLocaleString() : ""; }
+
+  document.querySelectorAll(".anno").forEach(function (panel) {
+    var key = panel.dataset.key;
+    var entry = state[key] || { status: "", note: "", ts: 0 };
+
+    var row = document.createElement("div"); row.className = "row";
+    var label = document.createElement("label");
+    label.textContent = "Status:"; label.htmlFor = key + "-status";
+    var sel = document.createElement("select"); sel.id = key + "-status";
+    STATUSES.forEach(function (s) {
+      var o = document.createElement("option");
+      o.value = s; o.textContent = s === "" ? "— no status —" : s;
+      sel.appendChild(o);
+    });
+    sel.value = entry.status;
+    row.appendChild(label); row.appendChild(sel); panel.appendChild(row);
+
+    var ta = document.createElement("textarea");
+    ta.placeholder = "Notes for this unit…"; ta.value = entry.note;
+    ta.setAttribute("aria-label", "Notes for " + panel.dataset.title);
+    panel.appendChild(ta);
+
+    var meta = document.createElement("div"); meta.className = "meta";
+    var saved = document.createElement("span"); saved.className = "saved";
+    saved.textContent = entry.ts ? "Saved " + fmtTime(entry.ts) : "";
+    var clr = document.createElement("button"); clr.className = "clear";
+    clr.type = "button"; clr.textContent = "Clear this note";
+    meta.appendChild(saved); meta.appendChild(clr); panel.appendChild(meta);
+
+    function update() {
+      state[key] = { status: sel.value, note: ta.value, ts: Date.now(),
+                     title: panel.dataset.title };
+      save(); saved.textContent = "Saved " + fmtTime(state[key].ts);
+    }
+    sel.addEventListener("change", update);
+    ta.addEventListener("input", update);
+    clr.addEventListener("click", function () {
+      sel.value = ""; ta.value = ""; delete state[key]; save();
+      saved.textContent = "";
+    });
+  });
+
+  function buildMarkdown() {
+    var lines = [];
+    lines.push("# Feedback on Candidate C v2 — Assumption Verification (V0)");
+    lines.push("");
+    lines.push("- Source: `docs/specs/decomposition-pyramid-v2.md`");
+    lines.push("- Walkthrough: `docs/specs/decomposition-pyramid-v2-review.html`");
+    lines.push("- Mode: `review`");
+    lines.push("- Generated: " + new Date().toLocaleString());
+    lines.push("");
+    lines.push("## Section Feedback");
+    var any = false;
+    document.querySelectorAll(".anno").forEach(function (panel) {
+      var e = state[panel.dataset.key];
+      if (!e || (!e.status && !e.note)) return;
+      any = true;
+      lines.push("");
+      lines.push("### " + panel.dataset.title);
+      lines.push("");
+      lines.push("- Status: " + (e.status || "(none)"));
+      if (e.note) { lines.push(""); lines.push(e.note); }
+    });
+    if (!any) { lines.push(""); lines.push("_(no sections annotated yet)_"); }
+    return lines.join("\n");
+  }
+
+  var statusEl = document.getElementById("exportStatus");
+  function flash(msg) {
+    statusEl.textContent = msg;
+    setTimeout(function () { statusEl.textContent = ""; }, 4000);
+  }
+
+  document.getElementById("copyBtn").addEventListener("click", function () {
+    var md = buildMarkdown();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(md).then(
+        function () { flash("Copied — paste into chat."); },
+        function () { showPreview(md, true); }
+      );
+    } else { showPreview(md, true); }
+  });
+
+  var dlg = document.getElementById("previewDlg");
+  var previewText = document.getElementById("previewText");
+  function showPreview(md, selectAll) {
+    previewText.value = md;
+    if (typeof dlg.showModal === "function") dlg.showModal();
+    else dlg.setAttribute("open", "open");
+    if (selectAll) { previewText.focus(); previewText.select(); flash("Clipboard blocked — select and copy manually."); }
+  }
+  document.getElementById("previewBtn").addEventListener("click", function () {
+    showPreview(buildMarkdown(), false);
+  });
+  document.getElementById("closeDlg").addEventListener("click", function () { dlg.close ? dlg.close() : dlg.removeAttribute("open"); });
+
+  document.getElementById("downloadBtn").addEventListener("click", function () {
+    var blob = new Blob([buildMarkdown()], { type: "text/markdown" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "pyramid-v2-v0-feedback.md";
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(a.href);
+    flash("Downloaded.");
+  });
+
+  document.getElementById("clearAllBtn").addEventListener("click", function () {
+    if (!confirm("Clear every note and status on this page?")) return;
+    state = {}; save();
+    document.querySelectorAll(".anno select").forEach(function (s) { s.value = ""; });
+    document.querySelectorAll(".anno textarea").forEach(function (t) { t.value = ""; });
+    document.querySelectorAll(".anno .saved").forEach(function (s) { s.textContent = ""; });
+    flash("All notes cleared.");
+  });
+})();
+</script>
+</body>
+</html>
