@@ -1,9 +1,9 @@
 # 005 — Reasoning-effort levels (low vs medium), candidate A
 
-- Status: draft (awaiting owner sign-off to freeze; 003 remains reserved for C v2-vs-v1)
+- Status: **frozen** (running)
 - Registered: 2026-07-17
-- Frozen: —
-- Owner sign-off: —
+- Frozen: 2026-07-17 (fresh scrape immediately prior; 55 eligible, first 40 pinned)
+- Owner sign-off: 2026-07-17 ("freeze 005")
 
 ## Hypothesis
 
@@ -20,14 +20,31 @@ quality dial we own, and we have zero evidence about it.
 
 Candidate A is deliberately the vehicle: cheapest arm, single call, isolates the dial
 (an ensemble would confound effort with pooling). Same research bundle shared per
-question (E-med runs first, E-low reuses the cache). Both stamped `--experiment-id 005`.
+question (E-med runs first, E-low reuses the cache). Retrieval is held constant across
+arms at the shipped default (news=asknews, general=perplexity as of experiment 006);
+only `[tasks.forecast_pass] effort` differs, via two frozen configs
+(`engine/config/experiment-005-{med,low}.toml`).
+
+**Arm distinguishing (scoring-integrity note):** both arms are the SAME method
+(`checklist-a`) and SAME model (`z-ai/glm-5.2`) — the manifest matcher (method+model)
+cannot tell them apart, and `ForecastRecord` does not store `effort`. So the arms are
+stamped with distinct ids — E-med `--experiment-id 005-med`, E-low `--experiment-id
+005-low` — and scored by a dedicated pairing script (pair by question_id across the two
+stamps), the same script-scored pattern experiment 004 uses. No `.toml` manifest is
+registered. Queued machinery fix: add `effort` to `ForecastRecord` + optional
+`ArmSpec.effort` matching, which would let same-method/model effort arms use the standard
+manifest path.
 
 ## Question set
 
 - Selection rule (to freeze): fresh scrape, open binary questions resolving within 60
   days, first N = 40 by soonest resolve; overlap with 001/002 pinned sets permitted
   (stamping isolates scoring).
-- Question ids: *(pinned at freeze)*.
+- Question ids (40, pinned 2026-07-17, soonest-resolving first):
+  43716, 43507, 44373, 43892, 44422, 43873, 44011, 44017, 44256, 35710,
+  44139, 44698, 43852, 44248, 43854, 39432, 43522, 43506, 44250, 43737,
+  43432, 44832, 44014, 43738, 44634, 44423, 44406, 43908, 43882, 43870,
+  43732, 43503, 44702, 44701, 44711, 43510, 43360, 44547, 44415, 44253.
 
 ## Metric & decision rule
 

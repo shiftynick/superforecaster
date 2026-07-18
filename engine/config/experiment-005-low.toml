@@ -1,0 +1,357 @@
+# FROZEN CONFIG - experiment 005 arm E-low (docs/experiments/005-effort-levels.md).
+# Identical to settings.toml except [tasks.forecast_pass] effort = "low".
+# Run stamped: forecast --experiment-id 005-low SUPERFORECASTER_CONFIG=engine/config/experiment-005-low.toml
+#
+# Superforecaster engine settings — the control panel.
+#
+# This one file holds all non-secret engine configuration: the config-over-code
+# rule in practice. Which model each task uses, how many tokens it may spend,
+# how much each model costs, where data is stored, and which tournaments to
+# forecast — all live here, never as literals buried in the logic.
+#
+# Secrets (tokens) never go here; they live in engine/.env by design.
+#
+# Any section may be omitted — the loader falls back to sensible defaults — so a
+# minimal file still works. Paths are resolved relative to the repo root (run
+# CLI commands from there).
+
+[data]
+snapshot_dir = "./data/snapshots"    # question snapshots (scraper output)
+forecast_dir = "./data/forecasts"    # forecast records
+
+[tournament]
+live = "summer-futureeval-2026"      # scored AIB tournament ($50k) — --live required
+sandbox = "bot-testing-area"         # unscored test tournament
+
+# [tasks.<name>] — one table per task type the engine performs.
+#   model      : the model id or alias to call.
+#   max_tokens : hard cap on the response length (required by the API).
+#   effort     : OPTIONAL. Omit for the CLI default. If set, must be one of
+#                "low" | "medium" | "high" — passed straight through to the
+#                provider CLI (Claude: --effort; Codex: model_reasoning_effort)
+#                to trade latency/cost for more careful reasoning.
+#   provider   : OPTIONAL. Which LLM backend runs the call. Defaults to
+#                "claude-cli" (the Claude Code CLI on the owner's subscription).
+#                Also supported: "codex-cli" (the Codex CLI on the owner's Codex
+#                subscription) and "openrouter" (a plain HTTPS API keyed by
+#                OPENROUTER_API_KEY in engine/.env — NOT a CLI). For openrouter,
+#                'model' is REQUIRED (it has no default model), 'max_tokens' is
+#                actually honored (the CLIs ignore it), and the logged cost is
+#                REAL dollars from usage.cost — not notional. The Metaculus-
+#                donated tournament credits arrive on an OpenRouter key, so that
+#                real cost is the true draw against them.
+
+# Testing default (2026-07-09): GLM-5.2 via OpenRouter — cheap ($0.53/$1.67 per
+# Mtok) with real-dollar cost from the API. Verified OpenRouter ids for the
+# current playground pair: "z-ai/glm-5.2" and "x-ai/grok-4.5" ($2/$6 per Mtok).
+[tasks.forecast_pass]
+provider = "openrouter"
+model = "z-ai/glm-5.2"
+effort = "low"                       # testing default; raise for real runs
+max_tokens = 16384                   # honored by openrouter; reasoning tokens
+                                     # count against it, so leave real headroom
+
+# Alternative: same task on Grok 4.5 (swap in for the table above).
+# [tasks.forecast_pass]
+# provider = "openrouter"
+# model = "x-ai/grok-4.5"
+# effort = "low"
+# max_tokens = 4096
+
+# Alternative: the Claude subscription via the Claude Code CLI (previous default).
+# [tasks.forecast_pass]
+# provider = "claude-cli"
+# model = "claude-sonnet-5"
+# effort = "low"
+# max_tokens = 4096
+
+# Query generation for the research/retrieval stack: one cheap LLM call that
+# turns a question into 2–4 web-search queries (one aimed at its resolution
+# source). Kept small and low-effort — it is a routing step, not the forecast.
+[tasks.query_gen]
+provider = "claude-cli"
+model = "claude-sonnet-5"
+effort = "low"
+max_tokens = 1024
+
+# Decomposition for candidate C (the pyramid): one LLM call that breaks a
+# question into a typed sub-question tree. This step sets the shape of the whole
+# argument, so it runs a STRONGER model than the cheap leaf passes — a bad
+# decomposition cannot be repaired downstream. max_tokens leaves room for the
+# reasoning-then-JSON tree the decomposer emits.
+[tasks.decompose]
+provider = "openrouter"
+model = "openai/gpt-5.6-terra"
+effort = "low"
+max_tokens = 16384
+
+# Holistic sanity check for candidate C: one direct forecast of the ROOT
+# question, blended against the structural (leaf-combined) estimate so the
+# structure never stands alone. Same model as the leaf passes (forecast_pass) —
+# it is a peer check, not the decomposition. If this table is omitted the pyramid
+# falls back to [tasks.forecast_pass] automatically.
+[tasks.holistic]
+provider = "openrouter"
+model = "z-ai/glm-5.2"
+effort = "low"
+max_tokens = 16384
+
+# Assumption verdict for candidate C v2 (assumption verification): one CHEAP LLM
+# call that reads a single search result set and votes whether it verifies,
+# falsifies, or fails to settle one assumption a node's estimate rests on. It is a
+# fact-check vote, not a forecast — keep it small and low-effort. If this table is
+# omitted the verification pass falls back to [tasks.forecast_pass] automatically.
+# [tasks.assumption_verdict]
+# provider = "openrouter"
+# model = "z-ai/glm-5.2"
+# effort = "low"
+# max_tokens = 2048
+
+# Verification query generation for candidate C v2: one CHEAP LLM call that turns a
+# single assumption (plus the root question, for context) into 1–2 targeted web
+# searches BEFORE the verification pass searches for it — searching the assumption's
+# prose verbatim retrieves meta-noise, not the fact it asserts. Same cheap routing
+# job as [tasks.query_gen], so if this table is omitted the pass falls back to
+# [tasks.query_gen] automatically (NOT to the heavier forecast model).
+# [tasks.verification_query_gen]
+# provider = "openrouter"
+# model = "z-ai/glm-5.2"
+# effort = "low"
+# max_tokens = 1024
+
+# Bundle judge for research-quality comparison (`compare-research`): one blinded
+# pairwise verdict over two research bundles (baseline vs. alt provider), used by
+# experiment 006. It never sees provider identities. Pinned to a NEUTRAL model so
+# neither search provider under test shares a vendor with the judge. Example only
+# here (commented); experiment 006 activates it in config/experiment-006.toml.
+# [tasks.bundle_judge]
+# provider = "claude-cli"
+# model = "claude-sonnet-5"
+# effort = "low"
+# max_tokens = 2048
+
+# Alternative: run the same task on the Codex subscription instead. Swap the
+# [tasks.forecast_pass] table above for this one (only one may be active).
+# Codex constrains its output to the forecast JSON Schema via --output-schema.
+# NOTE (2026-07-09): do NOT leave model = "" for codex-cli right now — the CLI
+# default inherits the owner's global ~/.codex/config.toml model ("gpt-5.6-sol"),
+# which current CLI versions refuse to run. "gpt-5.5" is verified accepted on
+# the ChatGPT-account plan. Pricing is optional and cost is notional under the
+# subscription, so no [pricing.*] entry is required.
+# [tasks.forecast_pass]
+# provider = "codex-cli"
+# model = "gpt-5.5"
+# effort = "low"
+# max_tokens = 4096
+
+# Alternative: run the same task through OpenRouter (a plain HTTPS API, not a
+# CLI). Swap the active [tasks.forecast_pass] table for this one. Requires
+# OPENROUTER_API_KEY in engine/.env. Unlike the CLIs: 'model' is required (there
+# is NO default model — OpenRouter routes by explicit id), 'max_tokens' is
+# honored, effort maps to OpenRouter's reasoning param, and json_schema maps to
+# structured-output response_format (models that don't support it fall back to
+# prompt-JSON automatically). The logged cost is REAL dollars (usage.cost from
+# the API), and it draws down the Metaculus-donated tournament credits, which
+# arrive on an OpenRouter key. No [pricing.*] entry is needed — OpenRouter
+# reports the actual cost, so price_for is only a fallback.
+# [tasks.forecast_pass]
+# provider = "openrouter"
+# model = "openai/gpt-5.5"
+# effort = "low"
+# max_tokens = 4096
+
+# [pricing.<model>] — dollar cost per million tokens, used only to log spend.
+#   A model with no pricing table simply records cost as unknown (null). Under a
+#   subscription, pricing is optional and any logged cost is notional — it tracks
+#   quota draw, not dollars billed.
+
+[pricing.claude-sonnet-5]
+input_per_mtok = 3.0
+output_per_mtok = 15.0
+
+# [retrieval] — the research/retrieval stack (search + content extraction).
+#   All fields are optional; omitting the section (or any field) uses the
+#   defaults shown. Secrets (ASK_NEWS_API_KEY, TAVILY_API_KEY, optional
+#   JINA_API_KEY) live in engine/.env, never here.
+#
+#   news_provider              : search client for the news role ("asknews").
+#   general_provider           : search client for the general-web role ("tavily";
+#                                "perplexity" — the Perplexity Search API — is under
+#                                evaluation in experiment 006).
+#   max_results                : results requested per search call.
+#   max_fetches_per_question   : cap on content fetches per forecast question.
+#   asknews_monthly_credit_cap : hard monthly AskNews credit cap; the client
+#                                refuses to call once exceeding it. 900 leaves
+#                                headroom under the 1,000-credit free tier.
+#   extract_min_chars          : quality gate — shorter extracted text = failure.
+#   extract_min_words          : quality gate — fewer words than this = failure.
+#   max_doc_chars              : cap on extracted-doc text stored in a research
+#                                bundle and handed to the prompt (keeps records
+#                                reviewable); longer bodies are truncated.
+#   timeout_seconds            : per-request HTTP timeout (search + extraction).
+#   reuse_research_max_age_hours : how many hours a cached research bundle stays
+#                                reusable by the `forecast` command, so a failed
+#                                pass does not throw away paid-for search credits.
+#                                0 disables reuse: always re-research.
+
+# [ensemble] — candidate B: N diverse forecasting passes over one shared research
+#   bundle, pooled in log-odds space. All fields are optional; omitting the
+#   section (or any field) uses the defaults shown here in code.
+#
+#   extremization_mode         : "fixed" applies extremization_coefficient
+#                                directly; "agreement" derives the coefficient
+#                                from how much the members agree (tighter spread
+#                                => more extremization).
+#   extremization_coefficient  : coefficient used in "fixed" mode (1.0 = none).
+#   agreement_min_coefficient  : coefficient at maximum member disagreement
+#                                ("agreement" mode).
+#   agreement_max_coefficient  : coefficient at full member agreement
+#                                ("agreement" mode).
+#   confidence_high_max_spread : member spread (std dev of log-odds) at/below
+#                                which the ensemble reports "high" confidence.
+#   confidence_low_min_spread  : member spread at/above which it reports "low"
+#                                ("medium" between the two thresholds).
+#
+#   [[ensemble.members]] tables define the roster (frame + model). When present
+#   they REPLACE the default roster entirely; when absent the built-in default
+#   set is used (3 frames on GLM-5.2 + outside-first on Grok-4.5 and Claude).
+#   Each member: frame (one of "outside-first" | "inside-first" | "status-quo"),
+#   plus the same model fields as a [tasks.*] table (provider/model/effort/
+#   max_tokens).
+
+[ensemble]
+extremization_mode = "fixed"         # "fixed" | "agreement"
+extremization_coefficient = 1.0
+agreement_min_coefficient = 1.0
+agreement_max_coefficient = 1.3
+confidence_high_max_spread = 0.4     # spread thresholds on member log-odds std dev
+confidence_low_min_spread = 1.2
+
+[[ensemble.members]]
+frame = "outside-first"
+provider = "openrouter"
+model = "z-ai/glm-5.2"
+effort = "low"
+max_tokens = 16384
+
+[[ensemble.members]]
+frame = "inside-first"
+provider = "openrouter"
+model = "z-ai/glm-5.2"
+effort = "low"
+max_tokens = 16384
+
+[[ensemble.members]]
+frame = "status-quo"
+provider = "openrouter"
+model = "z-ai/glm-5.2"
+effort = "low"
+max_tokens = 16384
+
+[[ensemble.members]]
+frame = "outside-first"
+provider = "openrouter"
+model = "x-ai/grok-4.5"
+effort = "low"
+max_tokens = 16384
+
+[[ensemble.members]]
+frame = "outside-first"
+provider = "claude-cli"
+model = "claude-sonnet-5"
+effort = "low"
+max_tokens = 4096
+
+# Frontier member (owner request at E1, 2026-07-10): one high-end model from a
+# lab not otherwise on the roster. gpt-5.6-terra = current OpenAI flagship tier
+# on OpenRouter ($2.50/$15 per Mtok; the -pro/-sol variants cost 2-12x more).
+[[ensemble.members]]
+frame = "outside-first"
+provider = "openrouter"
+model = "openai/gpt-5.6-terra"
+effort = "low"
+max_tokens = 16384
+
+# [pyramid] — candidate C: decompose the question into a typed tree, estimate its
+#   bedrock leaves, combine them upward into a "structural" probability, run one
+#   "holistic" direct forecast alongside, and blend the two. All fields are
+#   optional; omitting the section (or any field) uses the defaults shown here,
+#   which match the code defaults on PyramidSettings. The decompose / leaf /
+#   holistic MODELS live in [tasks.decompose] / [tasks.forecast_pass] /
+#   [tasks.holistic] above — this section is only the structural + blend knobs.
+#
+#   max_depth             : deepest tree level (root is depth 0). An internal node
+#                           at/beyond this depth is pruned to a leaf. Default 2 —
+#                           a TESTING default; expect to raise it for real runs
+#                           once the vertical slice shows the failure modes.
+#   max_children          : most children any internal node may keep; the overflow
+#                           is dropped (with a prune note). Default 4.
+#   max_conjuncts         : most multiplied children a conjunction/conditional may
+#                           keep — the guard against conjunctive error compounding
+#                           (multiplying several uncertain sub-events overshoots
+#                           toward 0). Default 3.
+#   leaf_clip_low         : lower bound each child probability is clipped to before
+#                           it is multiplied (blunts near-certain children). 0.03.
+#   leaf_clip_high        : upper bound for the same clip. Default 0.97.
+#   holistic_blend_weight : weight placed on the holistic estimate when blending it
+#                           with the structural one in log-odds space. Default 0.5
+#                           — the honest prior that we do not yet know which side
+#                           to trust; the experiment will tell us.
+#   combination_mode      : how internal nodes combine children. "guarded-product"
+#                           (v1, transparent + property-tested) or the reserved
+#                           "llm-synthesis" (a v2 hypothesis; not yet implemented).
+#   max_assumptions_per_node     : v2 runaway-output guard — a node's surfaced
+#                           assumption list is truncated to this many, with a prune
+#                           note. Default 8. Surfacing is cheap; this only stops
+#                           pathological output, it is NOT a target.
+#   max_assumption_verifications : v2 budget cap on how many researchable
+#                           assumptions are verified per question (one search + one
+#                           cheap verdict call each). Load-bearing researchable
+#                           assumptions are verified first. Default 6.
+#   leaf_topup_max_searches      : v2 §4 budget — how many evidence leaves, per
+#                           question, may draw ONE extra targeted search when the
+#                           shared bundle gives their key terms zero coverage.
+#                           Verification has priority (it runs first); top-up uses
+#                           whatever of this budget remains. Default 2; 0 disables.
+#   fragility_pull_weight        : v2 §3 — a leaf carrying >=1 UNVERIFIED
+#                           load-bearing assumption has its probability pulled
+#                           toward 0.5 (maximum uncertainty) by this weight in
+#                           log-odds space. Recomputable: the pre-pull value is
+#                           stored per leaf, so an experiment can re-score with the
+#                           pull off. Default 0.15; 0.0 disables. (Stage 2 pulls
+#                           toward 0.5, not a per-leaf base rate — leaves do not yet
+#                           emit a machine-readable anchor; that is queued.)
+#   unverified_lb_low_cap        : v2 §3 — this many or more unverified load-bearing
+#                           assumptions caps the RECORD's confidence at "low"
+#                           (third confidence signal, combined by the min). Def 2.
+#   unverified_lb_medium_cap     : this many or more caps confidence at "medium"
+#                           (the low cap wins when both fire). Default 1.
+#
+# [pyramid]
+# max_depth = 2
+# max_children = 4
+# max_conjuncts = 3
+# leaf_clip_low = 0.03
+# leaf_clip_high = 0.97
+# holistic_blend_weight = 0.5
+# combination_mode = "guarded-product"
+# max_assumptions_per_node = 8
+# max_assumption_verifications = 6
+# leaf_topup_max_searches = 2
+# fragility_pull_weight = 0.15
+# unverified_lb_low_cap = 2
+# unverified_lb_medium_cap = 1
+
+[retrieval]
+news_provider = "asknews"
+general_provider = "perplexity"       # adopted per experiment 006 (63.2% blinded
+                                      # pairwise win rate vs tavily; see the
+                                      # position-bias caveat in its Results)
+max_results = 5
+max_fetches_per_question = 8
+asknews_monthly_credit_cap = 900
+extract_min_chars = 500
+extract_min_words = 80
+max_doc_chars = 8000
+timeout_seconds = 20.0
+reuse_research_max_age_hours = 6.0
