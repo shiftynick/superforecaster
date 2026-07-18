@@ -261,7 +261,8 @@ class RetrievalSettings:
     Attributes:
         news_provider: Which search client fills the *news* role (``"asknews"``).
         general_provider: Which search client fills the *general web* role
-            (``"tavily"``).
+            (``"tavily"``, or ``"perplexity"`` — the Perplexity Search API, under
+            evaluation in experiment 006).
         max_results: Default number of results to request per search call.
         max_fetches_per_question: Cap on content fetches per forecast question
             (a budget guard used by the slice-2 research pipeline).

@@ -115,6 +115,17 @@ max_tokens = 16384
 # effort = "low"
 # max_tokens = 1024
 
+# Bundle judge for research-quality comparison (`compare-research`): one blinded
+# pairwise verdict over two research bundles (baseline vs. alt provider), used by
+# experiment 006. It never sees provider identities. Pinned to a NEUTRAL model so
+# neither search provider under test shares a vendor with the judge. Example only
+# here (commented); experiment 006 activates it in config/experiment-006.toml.
+# [tasks.bundle_judge]
+# provider = "claude-cli"
+# model = "claude-sonnet-5"
+# effort = "low"
+# max_tokens = 2048
+
 # Alternative: run the same task on the Codex subscription instead. Swap the
 # [tasks.forecast_pass] table above for this one (only one may be active).
 # Codex constrains its output to the forecast JSON Schema via --output-schema.
@@ -160,7 +171,9 @@ output_per_mtok = 15.0
 #   JINA_API_KEY) live in engine/.env, never here.
 #
 #   news_provider              : search client for the news role ("asknews").
-#   general_provider           : search client for the general-web role ("tavily").
+#   general_provider           : search client for the general-web role ("tavily";
+#                                "perplexity" — the Perplexity Search API — is under
+#                                evaluation in experiment 006).
 #   max_results                : results requested per search call.
 #   max_fetches_per_question   : cap on content fetches per forecast question.
 #   asknews_monthly_credit_cap : hard monthly AskNews credit cap; the client

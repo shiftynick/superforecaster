@@ -17,6 +17,7 @@ import pytest
 from superforecaster.config import RetrievalSettings
 from superforecaster.search import (
     AskNewsClient,
+    PerplexitySearchClient,
     SearchError,
     SearchQuotaError,
     TavilyClient,
@@ -63,6 +64,21 @@ _TAVILY_PLAIN_RESULT: dict[str, Any] = {
     "content": "Some general web content with no date attached.",
     "score": 0.5,
     "raw_content": None,
+}
+
+
+_PERPLEXITY_RESULT: dict[str, Any] = {
+    "title": "Federal Reserve holds rates steady in July 2026",
+    "url": "https://www.reuters.com/markets/us/fed-july-2026",
+    "snippet": "The Federal Reserve left its benchmark rate unchanged at the July meeting.",
+    "date": "2026-07-15",
+    "last_updated": "2026-07-16",
+}
+
+_PERPLEXITY_RESULT_NO_DATE: dict[str, Any] = {
+    "title": "An undated explainer page",
+    "url": "https://example.org/explainer",
+    "snippet": "Background with no publication date attached.",
 }
 
 
@@ -272,6 +288,84 @@ def test_tavily_http_error_becomes_search_error() -> None:
     client.close()
 
 
+# --- Perplexity Search API --------------------------------------------------
+
+
+def test_perplexity_parses_and_normalizes() -> None:
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["auth"] = request.headers.get("Authorization", "")
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"results": [_PERPLEXITY_RESULT]})
+
+    client = PerplexitySearchClient("pplx_k", transport=httpx.MockTransport(handler))
+    results = client.search(
+        "Fed rate decision",
+        max_results=3,
+        start_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 18),
+    )
+    client.close()
+
+    assert seen["auth"] == "Bearer pplx_k"
+    assert seen["path"] == "/search"
+    # Date bounds map to the MM/DD/YYYY filter params the Search API expects.
+    assert seen["body"] == {
+        "query": "Fed rate decision",
+        "max_results": 3,
+        "search_after_date_filter": "07/01/2026",
+        "search_before_date_filter": "07/18/2026",
+    }
+
+    assert len(results) == 1
+    r = results[0]
+    assert r.url == _PERPLEXITY_RESULT["url"]
+    assert r.title == _PERPLEXITY_RESULT["title"]
+    assert r.snippet == _PERPLEXITY_RESULT["snippet"]
+    assert r.source_domain == "www.reuters.com"  # derived from url
+    assert r.provider == "perplexity"
+    # ISO YYYY-MM-DD `date` parsed to a datetime.
+    assert r.published_at is not None
+    assert r.published_at.year == 2026 and r.published_at.month == 7
+    assert r.published_at.day == 15
+
+
+def test_perplexity_missing_date_yields_none() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        # No date bounds -> no filter params sent.
+        assert "search_after_date_filter" not in json.loads(request.content)
+        return httpx.Response(200, json={"results": [_PERPLEXITY_RESULT_NO_DATE]})
+
+    client = PerplexitySearchClient("k", transport=httpx.MockTransport(handler))
+    results = client.search("no dates", max_results=2)
+    client.close()
+
+    assert results[0].published_at is None
+    assert results[0].source_domain == "example.org"
+
+
+def test_perplexity_empty_results() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"results": []})
+
+    client = PerplexitySearchClient("k", transport=httpx.MockTransport(handler))
+    results = client.search("nothing", max_results=1)
+    client.close()
+    assert results == []
+
+
+def test_perplexity_http_error_becomes_search_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": "invalid key"})
+
+    client = PerplexitySearchClient("k", transport=httpx.MockTransport(handler))
+    with pytest.raises(SearchError):
+        client.search("q", max_results=1)
+    client.close()
+
+
 # --- Factory ----------------------------------------------------------------
 
 
@@ -301,6 +395,22 @@ def test_build_search_client_missing_key_raises(
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
     with pytest.raises(SearchError, match="TAVILY_API_KEY"):
         build_search_client("tavily", settings=_settings(), data_dir=tmp_path)
+
+
+def test_build_search_client_perplexity_uses_env_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "env_pplx")
+    client = build_search_client("perplexity", settings=_settings(), data_dir=tmp_path)
+    assert isinstance(client, PerplexitySearchClient)
+
+
+def test_build_search_client_perplexity_missing_key_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
+    with pytest.raises(SearchError, match="PERPLEXITY_API_KEY"):
+        build_search_client("perplexity", settings=_settings(), data_dir=tmp_path)
 
 
 def test_build_search_client_unknown_provider_raises(tmp_path: Path) -> None:

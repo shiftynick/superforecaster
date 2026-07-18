@@ -5,13 +5,17 @@ Mirrors :mod:`superforecaster.llm`'s provider pattern: a structural
 :func:`build_search_client` factory that maps a provider name to a client. The
 forecaster never names a provider or an endpoint itself; it asks the factory.
 
-Two providers today (ADR-0004):
+Three providers today (ADR-0004):
 
 - :class:`AskNewsClient` — the *news* role. AskNews returns AI summaries of
   recent articles plus a per-call credit cost, which we meter against a
   persisted monthly cap so we never blow past the free tier unknowingly.
 - :class:`TavilyClient` — the *general web* role. Tavily returns page excerpts;
   a publish date is only surfaced when the request sets ``topic="news"``.
+- :class:`PerplexitySearchClient` — an alternative *general web* role, added for
+  experiment 006. Perplexity's standalone **Search API** (``POST /search`` — raw
+  ranked results, NOT the Sonar chat/answers API) returns page excerpts with an
+  ISO-8601 ``date`` field on each hit.
 
 Both normalize into one :class:`SearchResult` shape (publish dates parsed from
 each provider's differing format into a common ``datetime``), and both take an
@@ -39,13 +43,16 @@ from .config import RetrievalSettings
 # Env var names holding each provider's key (loaded from engine/.env by the CLI).
 ASK_NEWS_API_KEY_ENV = "ASK_NEWS_API_KEY"
 TAVILY_API_KEY_ENV = "TAVILY_API_KEY"
+PERPLEXITY_API_KEY_ENV = "PERPLEXITY_API_KEY"
 
 # Provider role names (as they appear in [retrieval] config).
 ASKNEWS_PROVIDER = "asknews"
 TAVILY_PROVIDER = "tavily"
+PERPLEXITY_PROVIDER = "perplexity"
 
 _ASKNEWS_BASE_URL = "https://api.asknews.app"
 _TAVILY_BASE_URL = "https://api.tavily.com"
+_PERPLEXITY_BASE_URL = "https://api.perplexity.ai"
 
 # A normal-looking desktop browser UA. Some hosts serve empty bodies to obvious
 # bots; this keeps search-provider requests unremarkable.
@@ -501,6 +508,157 @@ class TavilyClient:
         )
 
 
+class PerplexitySearchClient:
+    """Search the general web via Perplexity's ``POST /search`` endpoint.
+
+    This is Perplexity's standalone **Search API** — raw ranked web results, NOT
+    the Sonar chat/answers API (ADR-0004 rejected LLM-synthesized answers for the
+    retrieval layer; we want excerpts we can weight and cite, not a paragraph).
+    Normalizes the top-level ``results`` array into :class:`SearchResult`\\ s.
+    Perplexity surfaces no domain field, so we derive it from each URL, and each
+    hit carries an optional ISO-8601 (``YYYY-MM-DD``) ``date`` field which maps to
+    ``published_at`` (``None`` when absent).
+
+    The Search API bills a flat rate per request (docs: $5 / 1,000 requests) with
+    no token charges, and rate limits are tiered by lifetime spend (the docs'
+    ladder runs 20-100 RPM; Tier 0 with no purchase is the low end, ~20 RPM = one
+    request per ~3 s). We space consecutive requests by ``min_request_interval_s``
+    and retry once on a 429, mirroring :class:`AskNewsClient`.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        transport: httpx.BaseTransport | None = None,
+        timeout_s: float = 20.0,
+        min_request_interval_s: float = 3.0,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        """Configure the client.
+
+        Args:
+            api_key: The Perplexity key. Sent as ``Authorization: Bearer <key>``.
+            transport: Optional ``httpx`` transport (tests inject a
+                ``MockTransport``).
+            timeout_s: Per-request HTTP timeout.
+            min_request_interval_s: Floor between consecutive requests from this
+                client. Tier 0 (no purchase) is ~20 RPM per the docs' rate-limit
+                ladder, i.e. one request per ~3 s; spacing requests keeps us under
+                it. Set to 0 to disable throttling.
+            monotonic: Clock for the throttle; injectable for tests.
+            sleep: Sleeper for throttle/backoff waits; injectable for tests.
+        """
+        self._api_key = api_key
+        self._min_interval = min_request_interval_s
+        self._monotonic = monotonic
+        self._sleep = sleep
+        self._last_request_at: float | None = None
+        self._client = httpx.Client(
+            base_url=_PERPLEXITY_BASE_URL,
+            transport=transport,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": _BROWSER_UA,
+            },
+            timeout=timeout_s,
+        )
+
+    def __enter__(self) -> PerplexitySearchClient:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Close the underlying HTTP connection pool."""
+        self._client.close()
+
+    def search(
+        self,
+        query: str,
+        *,
+        max_results: int,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[SearchResult]:
+        """Search via Perplexity's Search API; date bounds filter server-side.
+
+        ``start_date``/``end_date`` map to the API's ``search_after_date_filter``/
+        ``search_before_date_filter`` params, which the Search API expects in
+        ``MM/DD/YYYY`` format (its response ``date`` is ISO ``YYYY-MM-DD``).
+
+        Raises:
+            SearchError: The HTTP call failed or returned an unexpected shape.
+        """
+        payload: dict[str, Any] = {"query": query, "max_results": max_results}
+        if start_date is not None:
+            payload["search_after_date_filter"] = start_date.strftime("%m/%d/%Y")
+        if end_date is not None:
+            payload["search_before_date_filter"] = end_date.strftime("%m/%d/%Y")
+
+        try:
+            response = self._throttled_post("/search", payload)
+            response.raise_for_status()
+            body = response.json()
+        except httpx.HTTPError as exc:
+            raise SearchError(f"Perplexity request failed: {exc}") from exc
+
+        if not isinstance(body, dict):
+            raise SearchError("Perplexity returned a non-object response.")
+        results_raw = body.get("results")
+        if not isinstance(results_raw, list):
+            return []
+        results: list[SearchResult] = []
+        for item in results_raw:
+            if isinstance(item, dict):
+                results.append(self._to_result(item))
+        return results
+
+    def _throttled_post(self, path: str, payload: dict[str, Any]) -> httpx.Response:
+        """POST with a request-interval floor and one retry on 429.
+
+        Spaces consecutive requests by ``min_request_interval_s`` to respect the
+        tier rate limit and, if a 429 still arrives, waits ``Retry-After``
+        (default 5s, capped 30s) and retries once. A second 429 propagates to the
+        normal error path. Mirrors :meth:`AskNewsClient._throttled_get`.
+        """
+        now = self._monotonic()
+        if self._last_request_at is not None:
+            wait = self._min_interval - (now - self._last_request_at)
+            if wait > 0:
+                self._sleep(wait)
+        response = self._client.post(path, json=payload)
+        self._last_request_at = self._monotonic()
+        if response.status_code == 429:
+            retry_after = response.headers.get("Retry-After", "")
+            try:
+                delay = min(float(retry_after), 30.0) if retry_after else 5.0
+            except ValueError:
+                delay = 5.0
+            self._sleep(max(delay, self._min_interval))
+            response = self._client.post(path, json=payload)
+            self._last_request_at = self._monotonic()
+        return response
+
+    @staticmethod
+    def _to_result(item: dict[str, Any]) -> SearchResult:
+        """Normalize one Perplexity result dict into a :class:`SearchResult`."""
+        url = str(item.get("url") or "")
+        return SearchResult(
+            url=url,
+            title=str(item.get("title") or ""),
+            snippet=str(item.get("snippet") or ""),
+            # `date` is ISO YYYY-MM-DD when present; None otherwise.
+            published_at=_parse_iso8601(item.get("date")),
+            source_domain=_domain_of(url),
+            provider=PERPLEXITY_PROVIDER,
+            raw=item,
+        )
+
+
 def _require_env(env_var: str) -> str:
     """Return an env var's value or raise :class:`SearchError` if it is unset."""
     value = os.environ.get(env_var)
@@ -521,7 +679,7 @@ def build_search_client(
     """Return the search client for a provider name (the single dispatch point).
 
     Args:
-        provider: ``"asknews"`` or ``"tavily"``.
+        provider: ``"asknews"``, ``"tavily"``, or ``"perplexity"``.
         settings: The ``[retrieval]`` settings (timeouts, quota cap).
         data_dir: Directory under ``[data]`` where the AskNews quota counter
             file (``asknews_quota.json``) is persisted.
@@ -550,6 +708,14 @@ def build_search_client(
             timeout_s=settings.timeout_seconds,
             topic="news" if news_role else None,
         )
+    if provider == PERPLEXITY_PROVIDER:
+        key = api_key if api_key is not None else _require_env(PERPLEXITY_API_KEY_ENV)
+        return PerplexitySearchClient(
+            key,
+            transport=transport,
+            timeout_s=settings.timeout_seconds,
+        )
     raise SearchError(
-        f"Unknown search provider {provider!r}; supported: {ASKNEWS_PROVIDER}, {TAVILY_PROVIDER}."
+        f"Unknown search provider {provider!r}; supported: "
+        f"{ASKNEWS_PROVIDER}, {TAVILY_PROVIDER}, {PERPLEXITY_PROVIDER}."
     )
