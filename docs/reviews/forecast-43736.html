@@ -40,6 +40,7 @@ h2 { font-size: 1.05rem; margin: 1.75rem 0 0.6rem; border-bottom: 1px solid var(
 .assumptions { list-style: none; margin: 0.35rem 0 0; padding: 0; }
 .assumptions li { font-size: 0.85rem; margin: 0.2rem 0; color: #333; }
 .assumptions .ev { color: var(--muted); }
+.assumptions .aq { color: var(--muted); font-size: 0.78rem; margin: 0.1rem 0 0 1.4rem; }
 .node { border: 1px solid var(--line); border-left: 3px solid var(--accent);
         border-radius: 6px; padding: 0.75rem 0.9rem; margin: 0.6rem 0; background: var(--card); }
 .node.leaf { border-left-color: var(--evidence); }
@@ -62,54 +63,80 @@ footer { color: var(--muted); font-size: 0.8rem; margin-top: 2rem;
 <body>
 <main>
 <h1>Will the People&#x27;s Republic of China blockade or quarantine Taiwan before September 1, 2026?</h1>
-<p class="sub">Question 43736 · post 43707 · decomposition pyramid (candidate C) · 2026-07-18T12:17:16.782858+00:00</p>
+<p class="sub">Question 43736 · post 43707 · decomposition pyramid (candidate C) · 2026-07-18T12:42:12.399208+00:00</p>
 <div class="headline">
-<div class="stat"><div class="label">Structural</div><div class="value">6%</div></div>
-<div class="stat"><div class="label">Holistic</div><div class="value">6%</div></div>
-<div class="stat"><div class="label">Blended (final)</div><div class="value">6%</div></div>
+<div class="stat"><div class="label">Structural</div><div class="value">2%</div></div>
+<div class="stat"><div class="label">Holistic</div><div class="value">9%</div></div>
+<div class="stat"><div class="label">Blended (final)</div><div class="value">4%</div></div>
 <div class="stat"><div class="label">Confidence</div><div class="value">low</div></div>
 </div>
 <h2>How the final number was formed</h2>
-<p class="meta">The <strong>structural</strong> estimate (6%) comes from combining the leaf estimates up the tree. The <strong>holistic</strong> estimate (6%) is one direct forecast of the whole question. The final <strong>blended</strong> number (6%) is a log-odds blend of the two, weighting the holistic estimate 0.50.</p>
+<p class="meta">The <strong>structural</strong> estimate (2%) comes from combining the leaf estimates up the tree. The <strong>holistic</strong> estimate (9%) is one direct forecast of the whole question. The final <strong>blended</strong> number (4%) is a log-odds blend of the two, weighting the holistic estimate 0.50.</p>
 <h2>Confidence signals</h2>
-<p class="meta">Reported confidence <strong>low</strong> is the more cautious of three raw signals (all provisional):</p><ul><li>Weakest leaf confidence on a multiplied path: <strong>medium</strong></li><li>Structural-vs-holistic disagreement (log-odds gap): <strong>0.00</strong> (smaller = the two agree more)</li><li>Unverified load-bearing assumptions: <strong>3</strong> (more = confidence capped lower)</li></ul>
+<p class="meta">Reported confidence <strong>low</strong> is the more cautious of three raw signals (all provisional):</p><ul><li>Weakest leaf confidence on a multiplied path: <strong>low</strong></li><li>Structural-vs-holistic disagreement (log-odds gap): <strong>1.63</strong> (smaller = the two agree more)</li><li>Unverified load-bearing assumptions: <strong>3</strong> (more = confidence capped lower)</li></ul>
 <h2>Verification &amp; retrieval budget</h2>
-<p class="meta">Assumption verifications run: <strong>3</strong> (search credits 0). Leaf top-up searches: <strong>0</strong> (search credits 0).</p>
+<p class="meta">Assumption verifications run: <strong>4</strong> (search credits 0). Leaf top-up searches: <strong>0</strong> (search credits 0).</p>
 <h2>The argument tree</h2>
-<div class="node leaf">
-<p class="q">Between the question opening time (2026-05-29T21:00:00+00:00) and the scheduled close time (2026-08-31T23:00:00+00:00), will the U.S. executive branch publicly accuse the People&#x27;s Republic of China of blockading, quarantining, closing, or otherwise intentionally restricting maritime traffic entering at least one of Taiwan&#x27;s seaports, excluding accusations based only on military exercises, simulated blockades, or actions that restrict traffic without such an accusation?</p>
-<p class="meta"><span class="badge evidence">evidence</span> 
-<span class="prob"><strong>6%</strong></span> · confidence medium <span class="badge fragile">fragility pull</span></p>
-<p class="meta">Fragility pull (unverified load-bearing assumption): 4% → 6% toward 0.5.</p>
-<p class="meta">Anchor / reference class: U.S. executive branch accusations of foreign power blockading a specific territory</p>
-<p class="rationale">1. QUESTION RESTATEMENT: Will the U.S. executive branch, between May 29 and August 31, 2026, publicly accuse China of blockading, quarantining, closing, or otherwise intentionally restricting maritime traffic to at least one Taiwanese seaport? Accusations based only on military exercises or simulated blockades do NOT count. The U.S. must explicitly accuse China of actually restricting maritime traffic.
-
-2. REFERENCE CLASS AND BASE RATE: &#x27;U.S. executive branch public accusations of foreign power blockading a specific territory.&#x27; Such accusations are rare and represent a significant escalation. In the China-Taiwan context, the U.S. has historically condemned exercises and reaffirmed commitments but has not directly accused China of an actual blockade. Base rate for any given ~3-month window: roughly 2-5%.
-
-3. ADJUSTMENTS FOR SPECIFICS:
-- The sources show China escalating coast guard operations east of Taiwan in June 2026 [S17, S18, S19, S26], including harassing commercial shipping by requesting origin/destination information. This is concerning but falls short of an actual blockade.
-- The U.S. has condemned military exercises [S31] and the Pentagon condemned simulated blockade drills [S22], but these are explicitly excluded by the question.
-- Trump appears to want positive relations with Xi [S30], reducing likelihood of an escalation to a formal blockade accusation.
-- ODNI assesses the PRC likely will not invade Taiwan in 2027 [S28], suggesting the intelligence community does not see an imminent blockade.
-- U.S. attention is currently consumed by election interference accusations against China [S1, S2] and domestic policy changes [S4], not maritime blockade issues.
-- Only ~6 weeks remain in the window (July 18 to August 31).
-- No source shows the U.S. has already made the required accusation during the window.
-
-4. COUNTERARGUMENT: The strongest reason my estimate might be too low is that China&#x27;s grey-zone coast guard operations are intensifying [S16, S26], and if China actually restricts merchant vessel access to a Taiwanese port, the U.S. could feel compelled to make a formal accusation. The broad phrasing &#x27;otherwise intentionally restricting maritime traffic&#x27; could capture lesser actions. However, the U.S. has so far responded with measured diplomatic language rather than direct blockade accusations, and the sources show no indication of an imminent shift.
-
-5. FINAL PROBABILITY: 4%. The combination of low base rate, short remaining window, Trump&#x27;s conciliatory posture toward Xi, and no evidence of an actual blockade or pending U.S. accusation keeps this very low but nonzero given ongoing Chinese coast guard escalation.</p>
+<div class="node">
+<p class="q">Will this resolve Yes: between 2026-05-29T21:00:00+00:00 and 2026-08-31T23:00:00+00:00, will the U.S. executive branch publicly accuse the People&#x27;s Republic of China of blockading, quarantining, closing, or otherwise intentionally restricting maritime traffic entering at least one of Taiwan&#x27;s seaports?</p>
+<p class="meta"><span class="badge op">conditional</span></p>
 <ul class="assumptions">
-<li><span class="badge unverified">○ unverified</span> A public statement by the White House, State Department, Defense Department, another executive-branch agency, or an authorized executive-branch official qualifies as a public accusation by the U.S. executive branch. · load-bearing — <span class="ev">The search results describe the structure and authority of the executive branch but do not address whether such statements qualify as a public accusation by the U.S. executive branch.</span></li>
-<li><span class="badge unverified">○ unverified</span> The resolution hinges on the specified U.S. executive-branch accusation, rather than on whether a blockade or quarantine objectively occurs without such a statement. · load-bearing — <span class="ev">The search results discuss U.S. executive orders, blockades, and Cuba but do not address the resolution mechanics or whether the outcome hinges on a specified executive-branch accusation versus an objective blockade occurring without such a statement.</span></li>
-<li><span class="badge unverified">○ unverified</span> The scheduled close time, rather than any later resolution-administration time, is the final cutoff for an eligible accusation. · load-bearing — <span class="ev">Search results discuss case management, administrative closure, and filing time limits, but none address whether a scheduled close time versus later resolution-administration time is the final cutoff for an eligible accusation.</span></li>
+<li><span class="badge unverified">○ unverified</span> A qualifying public statement by any component or authorized official of the U.S. executive branch is sufficient for resolution. · load-bearing — <span class="ev">The results show examples of U.S. executive branch statements on Taiwan (White House, State Department), but none address whether such statements are sufficient for resolving a specific forecast.</span><div class="aq">searched: White House statement Taiwan blockade quarantine China response; State Department spokesperson Taiwan Strait blockade statement 2026</div></li>
+<li><span class="badge unverified">○ unverified</span> The resolution will exclude military exercises, simulated blockades, and incidental traffic disruption unless the required U.S. executive-branch accusation is made. · load-bearing — <span class="ev">The results discuss U.S. statements on China-Taiwan tensions and military exercises but do not address any specific forecast-resolution language about excluding exercises or simulated blockades absent a U.S. executive-branch accusation.</span><div class="aq">searched: White House statement China blockade Taiwan accusation 2026; US executive branch definition blockade quarantine Taiwan military exercise distinction</div></li>
+</ul>
+<p class="math">conditional: inputs [0.040, 0.474] → clipped [0.040, 0.474] → <strong>0.019</strong></p>
+<div class="children">
+<div class="node leaf">
+<p class="q">Will the People&#x27;s Republic of China, between 2026-05-29T21:00:00+00:00 and 2026-08-31T23:00:00+00:00, blockade, quarantine, close, or otherwise intentionally restrict maritime traffic entering at least one of Taiwan&#x27;s seaports, rather than merely conduct military exercises, simulated blockades, patrols, or actions that incidentally affect traffic?</p>
+<p class="meta"><span class="badge evidence">evidence</span> 
+<span class="prob"><strong>4%</strong></span> · confidence medium</p>
+<p class="meta">Anchor / reference class: PRC coercive actions against Taiwan escalating from gray-zone to actual blockade in a 3-month window, 2022-present</p>
+<p class="rationale">1. Question restated: Will China actually blockade, quarantine, close, or intentionally restrict maritime traffic entering at least one Taiwan seaport between May 29 and Aug 31, 2026 — AND will the U.S. executive branch publicly accuse China of doing so? Exercises, simulations, and incidental effects on traffic do not count. Both elements (actual restriction + U.S. public accusation) must occur.
+
+2. Reference class and base rate: PRC coercive actions against Taiwan that cross from gray-zone harassment into actual blockade/quarantine, in any given ~3-month window since 2022. China has conducted multiple blockade-simulation exercises (Joint Sword-2024A/B, Justice Mission 2025) and coast guard patrols, but has never actually imposed an operational blockade or quarantine on Taiwan&#x27;s ports. The U.S. has never publicly accused China of blockading Taiwan. Base rate for this combination in a 3-month window: approximately 2-4%.
+
+3. Adjustments: Sources show China escalated gray-zone activity within the question window — a &#x27;special maritime traffic law enforcement operation&#x27; east of Taiwan in June 2026 [S17, S18, S19, S26], with coast guard ships querying commercial vessels about origin and destination [S26]. However, this falls short of actually restricting port entry; it is harassment and jurisdiction-claiming, not a blockade. Critically, there is no evidence in any source that the U.S. executive branch has publicly accused China of blockading or quarantining Taiwan. The Trump administration issued warnings about war games [S31] but framed them as exercises, not actual blockades. The Trump-Xi summit struck a positive tone [S30], with Xi invited to the White House in September — reducing near-term escalation incentives. ODNI assessed in March 2026 that China likely will not invade in 2027 and will pursue coercive measures short of war [S28], consistent with continued gray-zone tactics rather than an actual blockade. The dual requirement (actual restriction + U.S. public accusation) sets a high bar, especially given Trump&#x27;s documented reluctance to confront China on Taiwan.
+
+4. Strongest counterargument: China&#x27;s coast guard enforcement operations in June 2026 represent a meaningful escalation beyond pure military exercises — they involved actual law-enforcement-style actions against commercial shipping near Taiwan. If China incrementally intensifies these operations (e.g., boarding ships, turning them away, declaring closure zones) before Sept 1, it could cross the threshold into intentional restriction. A geopolitical shock (e.g., a Taiwanese statement perceived as declaring independence) could trigger a rapid quarantine response. This pushes the estimate slightly above the base rate.
+
+5. Final probability: 4%. The gray-zone escalation is real and concerning, but the combination of (a) no actual port closure or traffic restriction evidenced, (b) no U.S. public accusation of blockade, (c) positive Trump-Xi dynamics, and (d) ODNI&#x27;s assessment that China prefers coercive measures short of war all keep the probability low. With ~6 weeks remaining, a sudden crossing of both thresholds is unlikely but not impossible.</p>
+<ul class="assumptions">
+<li><span class="badge verified-true">✓ verified-true</span> Reports of Chinese maritime law-enforcement operations and merchant-ship harassment east of Taiwan indicate heightened coercive activity but do not by themselves establish a restriction on entry to a Taiwan seaport. · load-bearing — <span class="ev">Search results confirm Chinese coast guard harassment of merchant ships east of Taiwan (asking for origin/destination info), but no result reports an actual restriction on entry to any Taiwan seaport; quarantine scenarios are discussed only hypothetically.</span><div class="aq">searched: Taiwan Coast Guard China maritime law enforcement harassment merchant ships 2026; China Coast Guard Taiwan port blockade quarantine restriction entry</div></li>
+<li><span class="badge verified-true">✓ verified-true</span> The reported 2025 and 2026 PLA blockade simulations and exercises remain nonqualifying unless China moves from rehearsal or signaling to an intentional operational restriction of port-bound maritime traffic. · load-bearing — <span class="ev">Search results describe the 2025 PLA drills (Strait Thunder-2025A and Justice Mission 2025) as exercises simulating blockade operations and port strikes, framed as warnings/deterrence rather than actual operational restrictions on port-bound maritime traffic, consistent with the assumption.</span><div class="aq">searched: PLA Taiwan blockade exercise 2026 port maritime traffic restriction; China live-fire exercise Taiwan encirclement drill 2025 2026 Strait Thunder</div></li>
 </ul>
 </div>
-<h2>Trace notes</h2><ul class='notes'>
-<li class="note">fragility pull: leaf &#x27;root&#x27; rests on an unverified load-bearing assumption; pulled 0.040 -&gt; 0.063 toward 0.5 (weight 0.15)</li>
-<li class="note">holistic pass raised (OpenRouter choice had no message content text.)</li>
-<li class="note">holistic pass failed; blended structural against itself (no holistic check)</li>
+<div class="node leaf">
+<p class="q">Given that the People&#x27;s Republic of China has, between 2026-05-29T21:00:00+00:00 and 2026-08-31T23:00:00+00:00, intentionally restricted maritime traffic entering at least one of Taiwan&#x27;s seaports, will the U.S. executive branch publicly accuse it before September 1, 2026 of blockading, quarantining, closing, or otherwise intentionally restricting that traffic?</p>
+<p class="meta"><span class="badge evidence">evidence</span> 
+<span class="prob"><strong>47%</strong></span> · confidence low <span class="badge fragile">fragility pull</span></p>
+<p class="meta">Fragility pull (unverified load-bearing assumption): 47% → 47% toward 0.5.</p>
+<p class="meta">Anchor / reference class: U.S. public accusations of Chinese coercive maritime actions near Taiwan</p>
+<p class="rationale">1. RESTATE: This is a conditional question. Given that China has intentionally restricted maritime traffic entering at least one Taiwan seaport between May 29 and Aug 31, 2026, will the U.S. executive branch publicly accuse China of blockading, quarantining, closing, or otherwise intentionally restricting that traffic before Sept 1, 2026? The resolution requires a public accusation using language that fits one of those categories.
+
+2. REFERENCE CLASS AND BASE RATE: &#x27;U.S. executive branch public accusations of Chinese coercive actions near Taiwan.&#x27; Historically, when China has conducted provocative military exercises near Taiwan (e.g., 2022 Pelosi-visit drills, 2024 Joint Sword drills), the U.S. has issued public statements but typically used measured language like &#x27;opposition to unilateral changes to the status quo by force or coercion&#x27; rather than explicitly accusing China of &#x27;blockading&#x27; or &#x27;restricting maritime traffic.&#x27; The base rate for using the specific accusatory language required here, even when China&#x27;s actions are blockade-like, appears modest — perhaps 30-40%.
+
+3. ADJUSTMENTS: Several factors push the estimate up and down.
+
+UP: The resolution language is broad — &#x27;otherwise intentionally restricting maritime traffic&#x27; could capture many formulations. If China genuinely restricts port access (not just exercises), political pressure from Congress [S3], allies, and media would be immense, forcing a stronger response. The window still has ~6 weeks remaining, allowing time for escalation.
+
+DOWN: Trump personally downplays Taiwan threats and maintains a positive relationship with Xi [S9, S30]. The White House response to blockade-simulation exercises was generic — &#x27;peace and stability&#x27; and &#x27;opposition to unilateral attempts to change the status quo&#x27; [S31] — not an explicit accusation of restricting maritime traffic. Sources show China&#x27;s coast guard is already &#x27;harassing&#x27; merchant ships east of Taiwan [S26] and conducting &#x27;maritime traffic law enforcement operations&#x27; [S17-19], yet no clear U.S. accusation matching the resolution criteria is evident in the sources. This suggests the administration is deliberately avoiding the specific accusatory framing.
+
+Net: I start at ~35% base rate, raise to ~45% for the breadth of resolution language and political pressure if genuine restrictions occur, then pull back to ~47% accounting for the remaining ~6 weeks and possible escalation. The conditional nature means I&#x27;m assessing U.S. behavior assuming the restriction has occurred — if it hasn&#x27;t occurred yet but does later, the response would likely be stronger.
+
+4. COUNTERARGUMENT: The strongest case against 47% is that if China actually restricts maritime traffic entering Taiwan&#x27;s seaports (as opposed to exercises or coast guard patrols in waters east of Taiwan), this would be an unprecedented peacetime escalation. The U.S. executive branch would face near-irresistible pressure to publicly and explicitly name what China is doing. Even a Trump administration seeking good relations with Xi would likely have the State Department, Pentagon, or NSC issue a statement using language like &#x27;China is restricting maritime traffic&#x27; or &#x27;interfering with freedom of navigation,&#x27; which would satisfy the broad resolution criteria. This could push the probability to 60%+. However, Trump&#x27;s demonstrated pattern of personalizing diplomacy with Xi and downplaying Taiwan threats [S9, S30], combined with the administration&#x27;s measured response to date [S31], keeps me below 50%.
+
+5. FINAL: 47%, low confidence. The conditional probability is genuinely uncertain — it depends on the severity of the restriction, Trump&#x27;s personal intervention, and whether lower-level officials make qualifying statements. The sources show escalating Chinese activity but no matching U.S. accusation yet, which cuts both ways (either the condition isn&#x27;t fully met, or the U.S. is deliberately avoiding the accusatory language).</p>
+<ul class="assumptions">
+<li><span class="badge unverified">○ unverified</span> The U.S. executive branch would publicly characterize a clearly evidenced Chinese restriction of traffic entering a Taiwan seaport in terms that meet one of the resolution&#x27;s listed formulations. · load-bearing</li>
+<li><span class="badge unverified">○ unverified</span> Public U.S. executive-branch communications concerning a qualifying incident would be available to resolution researchers before the scheduled resolve time.</li>
 </ul>
-<footer>Model pyramid-c · dry run · cost $0.0807 · 50452 tokens · search credits 4</footer>
+</div>
+</div>
+</div>
+<h2>Trace notes</h2><ul class='notes'>
+<li class="note">fragility pull: leaf &#x27;b&#x27; rests on an unverified load-bearing assumption; pulled 0.470 -&gt; 0.474 toward 0.5 (weight 0.15)</li>
+</ul>
+<footer>Model pyramid-c · dry run · cost $0.2377 · 114641 tokens · search credits 0</footer>
 </main>
 </body>
 </html>
