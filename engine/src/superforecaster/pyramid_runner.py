@@ -246,7 +246,7 @@ def run_pyramid_forecast(
     # 1.5. Verify the researchable assumptions the tree rests on. Verified-false
     # ones are injected into their owning leaf's estimation prompt below.
     assumptions, verifications_run, verification_credits = _verify_assumptions(
-        tree, pyr, search_client, client_factory, cost, notes
+        snapshot, tree, pyr, search_client, client_factory, cost, notes
     )
     falsified_by_node = _falsified_by_node(assumptions)
     unverified_lb_by_node = _unverified_load_bearing_by_node(assumptions)
@@ -592,6 +592,39 @@ def _holistic(
 
 # --- Assumption verification --------------------------------------------------
 
+# The verification query-gen system prompt: turn ONE assumption (plus the root
+# question, for context) into 1-2 targeted web searches. Mirrors research.py's
+# QUERY_GEN_SYSTEM style — short, plain, JSON out — because the failure it fixes is
+# exactly QUERY_GEN's absence here: searching an assumption's prose verbatim ("the
+# resolution hinges on the specified accusation...") retrieves meta-noise. This
+# step forces the search back onto the concrete FACT the assumption asserts.
+VERIFICATION_QUERY_GEN_SYSTEM = """\
+You turn ONE assumption that a forecast quietly relies on into web-search queries \
+that would confirm or refute it. You are given the assumption and the root \
+forecasting question it sits under, for context only.
+
+Rules:
+- Produce 1 or 2 focused search queries — concrete and keyword-rich: the specific \
+people, organizations, places, dates, numbers, laws, or documents the assumption \
+is about.
+- Search for the underlying FACT itself, the way a news or reference lookup would \
+phrase it. NEVER write meta-language about the forecast — no "resolution criteria", \
+"resolution hinges", "assumption", "load-bearing", and never just restate the \
+question. Those words retrieve commentary, not the fact.
+- If the assumption turns on an official source (an agency, court, calendar, \
+dataset, filing), aim one query at that source's own latest statement.
+
+Return ONLY a single JSON object and nothing else, of exactly this form:
+{"queries": ["first query", "second query"]}"""
+
+# Advisory schema for providers with server-side structured output; the Claude CLI
+# ignores it and we fall back to prompt-JSON extraction + validation.
+_VQUERY_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {"queries": {"type": "array", "items": {"type": "string"}}},
+    "required": ["queries"],
+}
+
 # The verdict system prompt: read one search result set and vote on whether it
 # verifies, falsifies, or fails to settle a single factual assumption. Cheap by
 # design — it reads evidence and returns a small JSON object, nothing more.
@@ -627,7 +660,31 @@ _VERDICT_SCHEMA: dict[str, object] = {
 _VALID_VERDICTS: frozenset[str] = frozenset({"verified-true", "verified-false", "unverified"})
 
 
+class _SearchBudget:
+    """A bounded per-question counter for the assumption-verification search draw.
+
+    See :func:`_verify_assumptions` for the budget semantics this enforces: a total
+    ceiling on the searches the verification pass may issue across all assumptions.
+    ``take`` grants one search if room remains; ``remaining`` is what is left.
+    """
+
+    def __init__(self, cap: int) -> None:
+        self._cap = max(0, cap)
+        self.used = 0
+
+    def remaining(self) -> int:
+        return max(0, self._cap - self.used)
+
+    def take(self) -> bool:
+        """Grant one search if budget remains; return whether it was granted."""
+        if self.used >= self._cap:
+            return False
+        self.used += 1
+        return True
+
+
 def _verify_assumptions(
+    snapshot: QuestionSnapshot,
     tree: PyramidNode,
     settings: PyramidSettings,
     search_client: SearchClient | None,
@@ -639,12 +696,28 @@ def _verify_assumptions(
 
     Collects every assumption across the tree (filling each ``node_id``), selects
     the researchable ones — deduped by normalized text, load-bearing first then
-    tree order, capped at ``max_assumption_verifications`` — and, for each, issues
-    ONE search plus one cheap verdict call. The verdict flips the assumption's
-    ``status``/``evidence`` in place; a duplicate assumption elsewhere in the tree
-    inherits the verdict. Every failure (no search client, a search error, a bad
-    verdict call) degrades that assumption to ``unverified`` with a trace note and
-    never raises.
+    tree order, capped at ``max_assumption_verifications`` — and, for each, first
+    runs one cheap query-gen call turning the assumption (plus the root question
+    for context) into 1-2 targeted searches, then issues those searches and one
+    cheap verdict call. Searching the assumption *prose* verbatim retrieves
+    meta-noise; the query-gen step forces the search onto the concrete fact.
+
+    **Budget semantics (documented deliberately).** ``max_assumption_verifications``
+    keeps its spec meaning — it caps how many ASSUMPTIONS are put through
+    verification (the selection cap above). A SEPARATE total-search ceiling of
+    ``max_assumption_verifications * 2`` bounds the searches the pass may draw,
+    since each assumption fans out to at most 2 queries (1 search each). The two
+    caps coincide in the normal case (N assumptions x 2 queries = 2N searches), so
+    every selected assumption is verified; the search ceiling only ever binds if
+    query fan-out would push the draw past 2N, in which case later assumptions are
+    left unverified rather than over-spending. Order stays load-bearing-first, so a
+    binding ceiling drops the least-important assumptions.
+
+    The verdict flips the assumption's ``status``/``evidence`` in place and its
+    ``queries_used`` records the searches issued; a duplicate assumption elsewhere
+    in the tree inherits all three. Every failure (no search client, a query-gen
+    failure — which degrades to a verbatim search — a search error, a bad verdict
+    call) degrades with a trace note and never raises.
 
     Returns the full flat assumption list, how many were actually put through
     verification, and the metered search credits the pass drew.
@@ -668,57 +741,106 @@ def _verify_assumptions(
     retrieval = load_retrieval_settings()
     verdict_config = _load_verdict_config()
     verdict_client = client_factory(verdict_config)
+    query_config = _load_verification_query_config()
+    query_client = client_factory(query_config)
+    budget = _SearchBudget(settings.max_assumption_verifications * 2)
 
     credits_before = _search_credits(search_client)
+    verifications_run = 0
     for assumption in to_verify:
-        _verify_one(
-            assumption, search_client, verdict_client, verdict_config, retrieval, cost, notes
-        )
+        if budget.remaining() <= 0:
+            notes.append(
+                f"assumption verification search budget exhausted; {assumption.text!r} "
+                f"left unverified"
+            )
+            continue
+        if _verify_one(
+            assumption,
+            snapshot.title,
+            search_client,
+            query_client,
+            query_config,
+            verdict_client,
+            verdict_config,
+            retrieval,
+            budget,
+            cost,
+            notes,
+        ):
+            verifications_run += 1
     credits_after = _search_credits(search_client)
     credits = _credit_delta(credits_before, credits_after)
 
     _propagate_verdicts(all_assumptions, to_verify)
-    return all_assumptions, len(to_verify), credits
+    return all_assumptions, verifications_run, credits
 
 
 def _verify_one(
     assumption: Assumption,
+    root_title: str,
     search_client: SearchClient,
+    query_client: LlmClient,
+    query_config: TaskModelConfig,
     verdict_client: LlmClient,
-    config: TaskModelConfig,
+    verdict_config: TaskModelConfig,
     retrieval: RetrievalSettings,
+    budget: _SearchBudget,
     cost: _CallCost,
     notes: list[str],
-) -> None:
-    """Run one assumption's search + verdict call, mutating it in place on success.
+) -> bool:
+    """Run one assumption's query-gen, searches, and verdict; mutate it in place.
 
-    Degrades to ``unverified`` (with a note) on a search error, a failed verdict
-    call, or an unparseable verdict — the assumption is left as it was. The verdict
-    call's tokens/cost are always folded into the running total when the call was
-    made (even if its output could not be parsed).
+    Returns whether the assumption was actually verified (at least one search plus
+    a verdict call attempted). Degrades to ``unverified`` (with a note, returning
+    ``False``) when the search budget leaves no room, every search errors, the
+    verdict call fails, or the verdict is unparseable. ``queries_used`` always
+    records the queries issued (the generated targeted ones, or the verbatim
+    assumption text when query-gen fell back). The query-gen and verdict calls'
+    tokens/cost are folded into the running total whenever the call was made.
     """
-    try:
-        results = search_client.search(assumption.text, max_results=retrieval.max_results)
-    except SearchError as exc:
+    queries = _generate_verification_queries(
+        assumption, root_title, query_client, query_config, cost, notes
+    )
+
+    results: list[SearchResult] = []
+    searched: list[str] = []
+    for query in queries:
+        if not budget.take():
+            notes.append(
+                f"assumption verification search budget exhausted mid-assumption for "
+                f"{assumption.text!r}; searched {len(searched)} of {len(queries)} query(ies)"
+            )
+            break
+        try:
+            results.extend(search_client.search(query, max_results=retrieval.max_results))
+        except SearchError as exc:
+            notes.append(
+                f"assumption verification search failed for query {query!r} ({exc}); skipped"
+            )
+            continue
+        searched.append(query)
+
+    assumption.queries_used = searched
+    if not searched:
         notes.append(
-            f"assumption verification search failed for {assumption.text!r} "
-            f"({exc}); left unverified"
+            f"assumption verification made no successful search for {assumption.text!r}; "
+            f"left unverified"
         )
-        return
+        return False
 
     try:
         result = _run(
             verdict_client,
             VERDICT_SYSTEM,
-            _verdict_prompt(assumption, results),
-            config,
+            _verdict_prompt(assumption, results, searched),
+            verdict_config,
             _VERDICT_SCHEMA,
         )
     except LlmError as exc:
         notes.append(
             f"assumption verdict call failed for {assumption.text!r} ({exc}); left unverified"
         )
-        return
+        return False
     cost.add_call(result.input_tokens, result.output_tokens, result.cost_usd)
 
     try:
@@ -727,12 +849,87 @@ def _verify_one(
         notes.append(
             f"assumption verdict did not parse for {assumption.text!r} ({exc}); left unverified"
         )
-        return
+        return False
 
     assumption.status = status
     assumption.evidence = evidence
     if status == "verified-false":
         notes.append(f"assumption verified FALSE: {assumption.text!r} — {evidence}")
+    return True
+
+
+def _generate_verification_queries(
+    assumption: Assumption,
+    root_title: str,
+    query_client: LlmClient,
+    config: TaskModelConfig,
+    cost: _CallCost,
+    notes: list[str],
+) -> list[str]:
+    """Turn one assumption into 1-2 targeted searches; degrade to verbatim on failure.
+
+    ONE cheap LLM call (no retry — this is a routing step). On an ``LlmError`` or an
+    unparseable reply, falls back to today's behavior — a single verbatim search of
+    the assumption text — leaving a trace note rather than crashing. The call's
+    tokens/cost are folded into the running total whenever the call was made.
+    """
+    prompt = _verification_query_prompt(assumption, root_title)
+    try:
+        result = _run(query_client, VERIFICATION_QUERY_GEN_SYSTEM, prompt, config, _VQUERY_SCHEMA)
+    except LlmError as exc:
+        notes.append(
+            f"verification query-gen call failed for {assumption.text!r} ({exc}); "
+            f"searched the assumption text verbatim"
+        )
+        return [assumption.text]
+    cost.add_call(result.input_tokens, result.output_tokens, result.cost_usd)
+
+    try:
+        return _parse_verification_queries(result.text)
+    except (json.JSONDecodeError, ValueError) as exc:
+        notes.append(
+            f"verification query-gen did not parse for {assumption.text!r} ({exc}); "
+            f"searched the assumption text verbatim"
+        )
+        return [assumption.text]
+
+
+def _parse_verification_queries(text: str) -> list[str]:
+    """Extract and validate the ``queries`` list from a verification query-gen reply.
+
+    Dedupes, drops blanks, and caps at TWO (the per-assumption fan-out limit the
+    search budget is sized against).
+
+    Raises:
+        json.JSONDecodeError: No JSON object could be located in the reply.
+        ValueError: The JSON was the wrong shape or held no usable query.
+    """
+    data = json.loads(_extract_json_object(text))
+    if not isinstance(data, dict):
+        raise ValueError("verification query-gen JSON was not an object")
+    queries = data.get("queries")
+    if not isinstance(queries, list):
+        raise ValueError("verification query-gen JSON had no 'queries' list")
+    cleaned: list[str] = []
+    for item in queries:
+        if isinstance(item, str) and item.strip():
+            candidate = item.strip()
+            if candidate not in cleaned:
+                cleaned.append(candidate)
+    if not cleaned:
+        raise ValueError("verification query-gen returned no usable queries")
+    return cleaned[:2]
+
+
+def _verification_query_prompt(assumption: Assumption, root_title: str) -> str:
+    """Build the verification query-gen user message: the assumption + root context."""
+    return "\n\n".join(
+        [
+            f"ROOT QUESTION (context only, do NOT search it verbatim):\n{root_title}",
+            f"ASSUMPTION TO CHECK:\n{assumption.text}",
+            "Return the JSON object of search queries now.",
+        ]
+    )
 
 
 def _collect_assumptions(tree: PyramidNode) -> list[Assumption]:
@@ -786,6 +983,7 @@ def _propagate_verdicts(all_assumptions: list[Assumption], verified: list[Assump
         if representative is not None and assumption is not representative:
             assumption.status = representative.status
             assumption.evidence = representative.evidence
+            assumption.queries_used = list(representative.queries_used)
 
 
 def _falsified_by_node(assumptions: list[Assumption]) -> dict[str, list[Assumption]]:
@@ -827,15 +1025,30 @@ def _falsified_addendum(falsified: list[Assumption]) -> str:
     return "\n".join(lines)
 
 
-def _verdict_prompt(assumption: Assumption, results: list[SearchResult]) -> str:
-    """Build the verdict user message: the assumption plus the search results."""
+def _verdict_prompt(assumption: Assumption, results: list[SearchResult], queries: list[str]) -> str:
+    """Build the verdict user message: the assumption, the queries, and the results.
+
+    The queries that produced ``results`` are shown so the verdict knows what was
+    (and was not) searched — an off-target query set is itself a reason a result
+    set fails to settle the assumption.
+    """
     return "\n\n".join(
         [
             f"ASSUMPTION TO CHECK:\n{assumption.text}",
+            _render_verdict_queries(queries),
             _render_verdict_sources(results),
             "Return the JSON verdict object now.",
         ]
     )
+
+
+def _render_verdict_queries(queries: list[str]) -> str:
+    """Render the compact list of search queries the verdict's results came from."""
+    if not queries:
+        return "SEARCH QUERIES USED:\n(none)"
+    lines = ["SEARCH QUERIES USED:"]
+    lines.extend(f"- {query}" for query in queries)
+    return "\n".join(lines)
 
 
 def _render_verdict_sources(results: list[SearchResult]) -> str:
@@ -1254,6 +1467,21 @@ def _load_verdict_config() -> TaskModelConfig:
         return load_task_config("assumption_verdict")
     except KeyError:
         return load_task_config("forecast_pass")
+
+
+def _load_verification_query_config() -> TaskModelConfig:
+    """The verification query-gen config: ``[tasks.verification_query_gen]``, else query_gen.
+
+    Unlike the verdict/holistic fallbacks (which fall back to ``forecast_pass``),
+    this routing step falls back to ``[tasks.query_gen]`` — turning an assumption
+    into targeted searches is the same cheap routing job the research stack's
+    query generation already does, so it should inherit that model, not the
+    heavier forecast model.
+    """
+    try:
+        return load_task_config("verification_query_gen")
+    except KeyError:
+        return load_task_config("query_gen")
 
 
 def _run(

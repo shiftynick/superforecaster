@@ -103,6 +103,18 @@ max_tokens = 16384
 # effort = "low"
 # max_tokens = 2048
 
+# Verification query generation for candidate C v2: one CHEAP LLM call that turns a
+# single assumption (plus the root question, for context) into 1–2 targeted web
+# searches BEFORE the verification pass searches for it — searching the assumption's
+# prose verbatim retrieves meta-noise, not the fact it asserts. Same cheap routing
+# job as [tasks.query_gen], so if this table is omitted the pass falls back to
+# [tasks.query_gen] automatically (NOT to the heavier forecast model).
+# [tasks.verification_query_gen]
+# provider = "openrouter"
+# model = "z-ai/glm-5.2"
+# effort = "low"
+# max_tokens = 1024
+
 # Alternative: run the same task on the Codex subscription instead. Swap the
 # [tasks.forecast_pass] table above for this one (only one may be active).
 # Codex constrains its output to the forecast JSON Schema via --output-schema.

@@ -123,6 +123,11 @@ class Assumption(BaseModel):
         status: Runtime outcome — ``"unverified"`` until the verdict call sets it.
         evidence: One-line citation or reason produced by verification (empty
             until then).
+        queries_used: The web-search queries the verification pass actually issued
+            for this assumption — the targeted queries a query-gen step derived
+            from the assumption text (or the assumption text itself when that step
+            failed and it fell back to a verbatim search). Empty until verified (and
+            on old records that predate the field, which parse with this default).
         node_id: The id of the node this assumption belongs to. Filled by the
             runner's tree-wide collector, so a flat list stays attributable to its
             node; empty on a node's own ``assumptions`` before collection.
@@ -133,6 +138,7 @@ class Assumption(BaseModel):
     verifiability: Verifiability
     status: AssumptionStatus = "unverified"
     evidence: str = ""
+    queries_used: list[str] = Field(default_factory=list)
     node_id: str = ""
 
 

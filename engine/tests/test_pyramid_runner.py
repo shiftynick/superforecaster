@@ -52,6 +52,11 @@ max_tokens = 1000
 provider = "claude-cli"
 model = "verdict-model"
 max_tokens = 1000
+
+[tasks.query_gen]
+provider = "claude-cli"
+model = "query-model"
+max_tokens = 1000
 """
 
 
@@ -404,6 +409,12 @@ def _verdict_json(verdict: str, evidence: str = "settled by the official calenda
     )
 
 
+def _query_gen_json(*queries: str) -> str:
+    """A verification query-gen reply carrying the given targeted search queries."""
+    body = ", ".join(f'"{q}"' for q in queries)
+    return f'Deciding what to search.\n\n```json\n{{"queries": [{body}]}}\n```'
+
+
 class _FakeSearch:
     """A fake search client: records queries, returns canned results, meters credits.
 
@@ -455,13 +466,22 @@ def _search_result() -> SearchResult:
     )
 
 
-def _verification_clients(verdict_reply: object) -> dict[str, _RecordingLlm]:
-    """The four task clients a verification run drives (verdict reply scripted)."""
+def _verification_clients(
+    verdict_reply: object,
+    query_reply: object = _query_gen_json("vote schedule 2026"),
+) -> dict[str, _RecordingLlm]:
+    """The task clients a verification run drives (verdict + query-gen scripted).
+
+    The query-gen client turns leaf a's assumption into ONE targeted search by
+    default; ``query_reply`` overrides that (e.g. to script a two-query fan-out or a
+    parse failure that forces the verbatim-text fallback).
+    """
     return {
         "decompose-model": _RecordingLlm([_tree_json(_ASSUMPTION_TREE)]),
         "leaf-model": _RecordingLlm([_forecast_json(0.5), _forecast_json(0.4)]),
         "holistic-model": _RecordingLlm([_forecast_json(0.3)]),
         "verdict-model": _RecordingLlm([verdict_reply]),
+        "query-model": _RecordingLlm([query_reply]),
     }
 
 
@@ -485,12 +505,15 @@ def test_assumption_verification_happy_path(_pin_settings: None) -> None:
     unverifiable = next(a for a in detail.assumptions if a.node_id == "b")
     assert researchable.status == "verified-true"
     assert researchable.evidence == "settled by the official calendar"
-    # The unverifiable one is never searched — it stays unverified.
+    # queries_used records the GENERATED targeted query, not the assumption prose.
+    assert researchable.queries_used == ["vote schedule 2026"]
+    # The unverifiable one is never searched — it stays unverified, no queries.
     assert unverifiable.status == "unverified"
+    assert unverifiable.queries_used == []
 
-    # Exactly one researchable assumption was verified (one search), and the
-    # evidence leaf "a" — uncovered by the tiny bundle — drew one top-up search.
-    assert search.queries == ["The vote happens on schedule", "Will step A happen?"]
+    # Verification searched the GENERATED query (not the assumption text verbatim),
+    # then the evidence leaf "a" — uncovered by the tiny bundle — drew one top-up.
+    assert search.queries == ["vote schedule 2026", "Will step A happen?"]
     assert detail.assumption_verifications_run == 1
     assert detail.assumption_search_credits == 2
     assert detail.leaf_topup_searches_run == 1
@@ -498,9 +521,9 @@ def test_assumption_verification_happy_path(_pin_settings: None) -> None:
 
     # Verification + top-up credits fold into the record's total (bundle 3 + 2 + 2).
     assert record.research_search_credits == 7
-    # Cost: decompose + 2 leaves + holistic + 1 verdict = 5 calls x $0.01. Top-up
-    # searches make no LLM call, so cost is unchanged.
-    assert record.cost_usd == pytest.approx(0.05)
+    # Cost: decompose + 2 leaves + holistic + 1 query-gen + 1 verdict = 6 calls x
+    # $0.01. Search calls make no LLM call, so they add nothing.
+    assert record.cost_usd == pytest.approx(0.06)
 
 
 def test_assumption_verdict_failure_degrades_to_unverified(_pin_settings: None) -> None:
@@ -595,6 +618,63 @@ def test_no_search_client_leaves_assumptions_unverified(_pin_settings: None) -> 
     assert any("no search client" in note for note in detail.notes)
     # The verdict client was never used.
     assert clients["verdict-model"].calls == []
+
+
+def test_verification_query_gen_two_queries_both_searched(_pin_settings: None) -> None:
+    # Query-gen fans one assumption out to TWO targeted queries; both are searched
+    # (2 of the max_assumption_verifications * 2 search budget), yet the assumption
+    # count — assumption_verifications_run — is still 1: the budget counts
+    # ASSUMPTIONS, the *2 search ceiling only bounds the fan-out.
+    clients = _verification_clients(
+        _verdict_json("verified-true"), _query_gen_json("q one", "q two")
+    )
+    search = _FakeSearch(per_call_credits=2)
+
+    record = run_pyramid_forecast(
+        _snapshot(),
+        research=_bundle(),
+        search_client=search,
+        client_factory=_factory_by_model(clients),
+        now=NOW,
+    )
+    detail = record.pyramid
+    assert detail is not None
+    researchable = next(a for a in detail.assumptions if a.node_id == "a")
+
+    # Both generated queries searched (in order), then the leaf-a top-up search.
+    assert search.queries == ["q one", "q two", "Will step A happen?"]
+    assert researchable.queries_used == ["q one", "q two"]
+    assert researchable.status == "verified-true"
+    assert detail.assumption_verifications_run == 1
+    # Verification drew 2 searches x 2 credits = 4; the top-up drew 2 more.
+    assert detail.assumption_search_credits == 4
+    assert detail.leaf_topup_search_credits == 2
+    assert record.research_search_credits == 9  # bundle 3 + verify 4 + top-up 2
+
+
+def test_verification_query_gen_failure_falls_back_to_verbatim(_pin_settings: None) -> None:
+    # An unparseable query-gen reply degrades to today's behavior: search the
+    # assumption text verbatim, with a trace note — never crash.
+    clients = _verification_clients(_verdict_json("verified-true"), "not valid json at all")
+    search = _FakeSearch(per_call_credits=1)
+
+    record = run_pyramid_forecast(
+        _snapshot(),
+        research=_bundle(),
+        search_client=search,
+        client_factory=_factory_by_model(clients),
+        now=NOW,
+    )
+    detail = record.pyramid
+    assert detail is not None
+    researchable = next(a for a in detail.assumptions if a.node_id == "a")
+
+    # Fell back to the verbatim assumption text; the verdict still ran on it.
+    assert researchable.queries_used == ["The vote happens on schedule"]
+    assert search.queries[0] == "The vote happens on schedule"
+    assert researchable.status == "verified-true"
+    assert detail.assumption_verifications_run == 1
+    assert any("query-gen did not parse" in note for note in detail.notes)
 
 
 def test_select_assumptions_dedupe_ordering_and_cap() -> None:

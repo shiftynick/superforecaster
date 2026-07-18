@@ -178,6 +178,7 @@ def _pyramid_record_with_assumptions() -> ForecastRecord:
                         verifiability="researchable",
                         status="verified-true",
                         evidence="confirmed by the agency methodology page",
+                        queries_used=["agency methodology 2026", "agency measurement standard"],
                         node_id="a",
                     ),
                     Assumption(
@@ -263,6 +264,8 @@ def test_render_pyramid_assumption_badges_and_indicators() -> None:
     # The one-line evidence for a verified assumption surfaces.
     assert "the vote was postponed to next year" in html
     assert "confirmed by the agency methodology page" in html
+    # The targeted queries the verification pass actually searched surface too.
+    assert "searched: agency methodology 2026; agency measurement standard" in html
     # Fragility pull and top-up indicators + the verification/retrieval accounting.
     assert "fragility pull" in html.lower()
     assert "70%" in html and "62%" in html  # pre-pull -> post-pull

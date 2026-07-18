@@ -61,6 +61,7 @@ h2 { font-size: 1.05rem; margin: 1.75rem 0 0.6rem; border-bottom: 1px solid var(
 .assumptions { list-style: none; margin: 0.35rem 0 0; padding: 0; }
 .assumptions li { font-size: 0.85rem; margin: 0.2rem 0; color: #333; }
 .assumptions .ev { color: var(--muted); }
+.assumptions .aq { color: var(--muted); font-size: 0.78rem; margin: 0.1rem 0 0 1.4rem; }
 .node { border: 1px solid var(--line); border-left: 3px solid var(--accent);
         border-radius: 6px; padding: 0.75rem 0.9rem; margin: 0.6rem 0; background: var(--card); }
 .node.leaf { border-left-color: var(--evidence); }
@@ -287,9 +288,14 @@ def _render_assumptions(node: PyramidNode) -> str:
             if assumption.evidence
             else ""
         )
+        queries = (
+            f'<div class="aq">searched: {escape("; ".join(assumption.queries_used))}</div>'
+            if assumption.queries_used
+            else ""
+        )
         items.append(
             f'<li><span class="badge {escape(status)}">{glyph} {escape(status)}</span> '
-            f"{escape(assumption.text)}{lb}{evidence}</li>"
+            f"{escape(assumption.text)}{lb}{evidence}{queries}</li>"
         )
     items.append("</ul>")
     return "\n".join(items)
