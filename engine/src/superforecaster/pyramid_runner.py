@@ -14,9 +14,10 @@ combination math), this module is *stage 2*: it drives the actual forecast.
    *structural* probability plus a per-node trace.
 4. **Holistic** — one direct forecast of the root question, alongside the tree.
 5. **Blend** structural and holistic in log-odds space into the final probability.
-6. **Confidence** from two raw signals (weakest leaf confidence on a multiplied
-   path; the structural-vs-holistic log-odds gap), both stored, the label being
-   their conservative minimum.
+6. **Confidence** from three raw signals (weakest leaf confidence on a multiplied
+   path; the structural-vs-holistic log-odds gap; the count of unverified
+   load-bearing assumptions), all stored, the label being their conservative
+   minimum.
 
 The whole legible argument graph is persisted on one :class:`ForecastRecord`
 (``method="pyramid-c"``) via its :class:`PyramidDetail` — the same "rich detail on
@@ -30,6 +31,7 @@ leave a note in the trace; the pyramid always returns a record.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 
@@ -247,13 +249,20 @@ def run_pyramid_forecast(
         tree, pyr, search_client, client_factory, cost, notes
     )
     falsified_by_node = _falsified_by_node(assumptions)
+    unverified_lb_by_node = _unverified_load_bearing_by_node(assumptions)
+    unverified_lb_count = sum(len(v) for v in unverified_lb_by_node.values())
 
-    # 2. Leaves.
+    # 2. Leaves. Each evidence leaf whose key terms are uncovered by the shared
+    # bundle may draw ONE top-up search (spec §4); a leaf resting on an unverified
+    # load-bearing assumption then has its estimate pulled toward 0.5 (spec §3).
     leaf_nodes = _collect_leaves(tree)
     leaf_estimates: list[LeafEstimate] = []
     leaf_probabilities: dict[str, float] = {}
     leaf_client = client_factory(leaf_config)
+    topup_budget = _TopupBudget(pyr.leaf_topup_max_searches)
+    topup_credits_before = _search_credits(search_client) if search_client is not None else None
     for leaf in leaf_nodes:
+        extra_results, topup_used = _leaf_topup(leaf, research, search_client, topup_budget, notes)
         estimate = _estimate_leaf(
             snapshot,
             leaf,
@@ -264,9 +273,17 @@ def run_pyramid_forecast(
             cost,
             notes,
             falsified=falsified_by_node.get(leaf.id, []),
+            extra_results=extra_results,
+            topup_used=topup_used,
         )
+        estimate = _apply_fragility_pull(estimate, leaf.id in unverified_lb_by_node, pyr, notes)
         leaf_estimates.append(estimate)
         leaf_probabilities[leaf.id] = estimate.probability
+    topup_credits = (
+        _credit_delta(topup_credits_before, _search_credits(search_client))
+        if search_client is not None
+        else 0
+    )
 
     # 3. Combine upward into a structural probability + per-node trace.
     structural_probability, trace = combine_tree(
@@ -290,11 +307,16 @@ def run_pyramid_forecast(
     # 5. Blend.
     blended = blend(structural_probability, holistic_probability, pyr.holistic_blend_weight)
 
-    # 6. Confidence — two raw signals, label = their conservative minimum.
+    # 6. Confidence — three raw signals, label = their conservative minimum. The
+    # third (spec §3) caps confidence by the count of unverified load-bearing
+    # assumptions the tree still rests on.
     weakest_leaf = _weakest_leaf_confidence(tree, leaf_estimates)
     gap = abs(to_log_odds(structural_probability) - to_log_odds(holistic_probability))
     gap_confidence = _confidence_from_gap(gap, ens)
-    final_confidence = _min_confidence(weakest_leaf, gap_confidence)
+    unverified_lb_cap = _confidence_from_unverified_load_bearing(unverified_lb_count, pyr)
+    final_confidence = _min_confidence(
+        _min_confidence(weakest_leaf, gap_confidence), unverified_lb_cap
+    )
 
     detail = PyramidDetail(
         tree=tree,
@@ -310,6 +332,9 @@ def run_pyramid_forecast(
         assumptions=assumptions,
         assumption_verifications_run=verifications_run,
         assumption_search_credits=verification_credits,
+        unverified_load_bearing_count=unverified_lb_count,
+        leaf_topup_searches_run=topup_budget.used,
+        leaf_topup_search_credits=topup_credits,
         notes=notes,
     )
 
@@ -331,7 +356,9 @@ def run_pyramid_forecast(
         submitted_at=None,
         research=research,
         research_search_credits=(
-            (research.search_credits_used if research is not None else 0) + verification_credits
+            (research.search_credits_used if research is not None else 0)
+            + verification_credits
+            + topup_credits
         ),
         method="pyramid-c",
         frame=None,
@@ -442,6 +469,8 @@ def _estimate_leaf(
     notes: list[str],
     *,
     falsified: list[Assumption],
+    extra_results: list[SearchResult],
+    topup_used: bool,
 ) -> LeafEstimate:
     """Estimate one leaf via :func:`run_forecast_pass`, degrading on failure.
 
@@ -454,9 +483,18 @@ def _estimate_leaf(
     when present, they are injected prominently into the estimation prompt (via
     ``run_forecast_pass``'s ``system_addendum`` seam) so the leaf reasons with the
     corrected facts rather than the wrong hidden guess (spec §4).
+
+    ``extra_results`` are top-up search hits (spec §4) for an evidence leaf whose
+    key terms the shared bundle did not cover; they are appended to the leaf's
+    SOURCES block. ``topup_used`` records whether that draw happened (stored on
+    the returned estimate). The fragility pull is applied by the caller, not here.
     """
     grounding = leaf.grounding if leaf.grounding is not None else "evidence"
     leaf_research = research if grounding == "evidence" else None
+    if extra_results and leaf_research is not None:
+        leaf_research = leaf_research.model_copy(
+            update={"results": [*leaf_research.results, *extra_results]}
+        )
     leaf_snapshot = _leaf_snapshot(snapshot, leaf.question)
     addendum = _falsified_addendum(falsified) if falsified else None
     try:
@@ -479,6 +517,7 @@ def _estimate_leaf(
             rationale=f"Leaf estimation failed and was defaulted: {exc}",
             reference_class="",
             failed=True,
+            topup_search_used=topup_used,
         )
     cost.add_record(record)
     return LeafEstimate(
@@ -490,6 +529,7 @@ def _estimate_leaf(
         rationale=record.rationale,
         reference_class=record.reference_class,
         failed=False,
+        topup_search_used=topup_used,
     )
 
 
@@ -757,6 +797,21 @@ def _falsified_by_node(assumptions: list[Assumption]) -> dict[str, list[Assumpti
     return grouped
 
 
+def _unverified_load_bearing_by_node(assumptions: list[Assumption]) -> dict[str, list[Assumption]]:
+    """Group the still-``unverified`` load-bearing assumptions by owning node id.
+
+    These are the assumptions that drive both the fragility pull (spec §3, applied
+    per leaf) and the third confidence signal (their total count). An assumption
+    counts only when it is load-bearing AND ``unverified`` after the verification
+    pass — a verified-true/false one is no longer a hidden risk.
+    """
+    grouped: dict[str, list[Assumption]] = {}
+    for assumption in assumptions:
+        if assumption.load_bearing and assumption.status == "unverified":
+            grouped.setdefault(assumption.node_id, []).append(assumption)
+    return grouped
+
+
 def _falsified_addendum(falsified: list[Assumption]) -> str:
     """The system-prompt section injecting a leaf's falsified assumptions (spec §4)."""
     lines = [
@@ -845,7 +900,222 @@ def _normalize(text: str) -> str:
     return " ".join(text.lower().split())
 
 
+# --- Fragility pull -----------------------------------------------------------
+
+# The anchor the fragility pull drags a fragile leaf toward. Spec §3 calls for the
+# leaf's *outside-view base rate*, but leaves do not yet emit a machine-readable
+# base rate (ForecastOutput carries no numeric anchor — extracting one is a queued
+# improvement). In stage 2 the anchor is therefore 0.5, "maximum uncertainty":
+# discount a fragile leaf toward not-knowing rather than toward a specific number
+# we cannot read. Documented as a deliberate deviation in the v2 spec.
+_FRAGILITY_ANCHOR = 0.5
+
+
+def _apply_fragility_pull(
+    estimate: LeafEstimate,
+    has_unverified_load_bearing: bool,
+    settings: PyramidSettings,
+    notes: list[str],
+) -> LeafEstimate:
+    """Pull a fragile leaf's probability toward the 0.5 anchor (spec §3).
+
+    A leaf resting on ≥1 unverified load-bearing assumption is "fragile": its
+    estimate silently rides on a belief we could not confirm. We discount it by
+    pulling ``probability`` toward :data:`_FRAGILITY_ANCHOR` (0.5) in log-odds
+    space by ``fragility_pull_weight`` — reusing :func:`blend`, the project's
+    log-odds pool, so no new math is introduced (``blend(p, 0.5, w)`` weights the
+    anchor ``w``). The pre-pull probability is stored on the returned estimate so
+    an experiment can re-score with the pull disabled (recomputability).
+
+    A weight of ``0.0`` or a non-fragile leaf returns the estimate unchanged.
+    """
+    if not has_unverified_load_bearing or settings.fragility_pull_weight <= 0.0:
+        return estimate
+    pulled = blend(estimate.probability, _FRAGILITY_ANCHOR, settings.fragility_pull_weight)
+    notes.append(
+        f"fragility pull: leaf {estimate.node_id!r} rests on an unverified load-bearing "
+        f"assumption; pulled {estimate.probability:.3f} -> {pulled:.3f} toward 0.5 "
+        f"(weight {settings.fragility_pull_weight:.2f})"
+    )
+    return estimate.model_copy(
+        update={
+            "pre_pull_probability": estimate.probability,
+            "probability": pulled,
+            "fragility_pull_applied": True,
+        }
+    )
+
+
+# --- Leaf retrieval top-up ----------------------------------------------------
+
+# Short function words stripped before checking bundle coverage: they carry no
+# topic signal, so a leaf sharing only "will"/"that" with the bundle is still
+# uncovered. Kept deliberately small — the heuristic only needs to catch leaves
+# the bundle plainly never mentions.
+_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "will",
+        "would",
+        "that",
+        "this",
+        "with",
+        "from",
+        "have",
+        "has",
+        "had",
+        "the",
+        "and",
+        "for",
+        "are",
+        "was",
+        "were",
+        "been",
+        "being",
+        "into",
+        "than",
+        "then",
+        "them",
+        "they",
+        "their",
+        "there",
+        "here",
+        "what",
+        "when",
+        "which",
+        "whether",
+        "does",
+        "did",
+        "any",
+        "all",
+        "not",
+        "but",
+        "its",
+        "his",
+        "her",
+        "our",
+        "your",
+        "over",
+        "under",
+        "more",
+        "most",
+        "some",
+        "such",
+        "only",
+        "also",
+        "about",
+        "before",
+        "after",
+        "during",
+        "between",
+    }
+)
+
+
+class _TopupBudget:
+    """A tiny per-question counter for the leaf top-up search budget (spec §4).
+
+    Top-up shares the search stack with verification, which has priority (it runs
+    first, before this counter is touched). ``cap`` is ``leaf_topup_max_searches``;
+    each leaf that draws a top-up search calls :meth:`take` once. ``used`` is the
+    number granted, for the trace.
+    """
+
+    def __init__(self, cap: int) -> None:
+        self._cap = max(0, cap)
+        self.used = 0
+
+    def take(self) -> bool:
+        """Grant one top-up search if budget remains; return whether it was granted."""
+        if self.used >= self._cap:
+            return False
+        self.used += 1
+        return True
+
+
+def _significant_terms(text: str) -> set[str]:
+    """Lowercased, stopword-stripped word tokens longer than three characters."""
+    tokens = re.findall(r"[a-z0-9]+", text.lower())
+    return {t for t in tokens if len(t) > 3 and t not in _STOPWORDS}
+
+
+def _bundle_covers(terms: set[str], research: ResearchBundle) -> bool:
+    """Whether any of ``terms`` appears in the bundle's titles/snippets/doc text.
+
+    The cheap coverage heuristic from spec §4: a leaf is "covered" if even one of
+    its significant terms shows up somewhere in the shared bundle. Empty ``terms``
+    (a leaf with no significant words) counts as covered — there is nothing to
+    search for.
+    """
+    if not terms:
+        return True
+    parts: list[str] = []
+    for result in research.results:
+        parts.append(result.title)
+        parts.append(result.snippet)
+    for doc in research.docs:
+        parts.append(doc.text)
+    haystack = " ".join(parts).lower()
+    return any(term in haystack for term in terms)
+
+
+def _leaf_topup(
+    leaf: PyramidNode,
+    research: ResearchBundle | None,
+    search_client: SearchClient | None,
+    budget: _TopupBudget,
+    notes: list[str],
+) -> tuple[list[SearchResult], bool]:
+    """Maybe draw one top-up search for an evidence leaf the bundle does not cover.
+
+    Returns ``(extra_results, used)``. Top-up is attempted only when: there is a
+    search client and a shared bundle, the leaf is an ``evidence`` leaf, the
+    bundle gives its key terms zero coverage, and the top-up budget has room. A
+    search error degrades to no extra results (``used=False``) with a note; the
+    budget slot is still consumed (the attempt is recorded), matching how
+    verification meters an attempt even when its verdict fails.
+    """
+    if search_client is None or research is None:
+        return [], False
+    if leaf.grounding != "evidence":
+        return [], False
+    terms = _significant_terms(leaf.question)
+    if _bundle_covers(terms, research):
+        return [], False
+    if not budget.take():
+        notes.append(
+            f"leaf top-up skipped for {leaf.id!r}: zero bundle coverage but the "
+            f"top-up search budget is exhausted"
+        )
+        return [], False
+
+    retrieval = load_retrieval_settings()
+    try:
+        results = search_client.search(leaf.question, max_results=retrieval.max_results)
+    except SearchError as exc:
+        notes.append(f"leaf top-up search failed for {leaf.id!r} ({exc}); leaf left as-is")
+        return [], False
+    notes.append(
+        f"leaf top-up: {leaf.id!r} had zero bundle coverage; appended {len(results)} "
+        f"targeted result(s) to its context"
+    )
+    return results, True
+
+
 # --- Confidence ---------------------------------------------------------------
+
+
+def _confidence_from_unverified_load_bearing(count: int, settings: PyramidSettings) -> Confidence:
+    """Map the unverified-load-bearing count onto a confidence cap (spec §3).
+
+    ``≥ unverified_lb_low_cap`` caps at ``"low"``; ``≥ unverified_lb_medium_cap``
+    caps at ``"medium"``; otherwise no cap (``"high"``). This is the third raw
+    confidence signal, combined with the other two by the conservative minimum.
+    """
+    if count >= settings.unverified_lb_low_cap:
+        return "low"
+    if count >= settings.unverified_lb_medium_cap:
+        return "medium"
+    return "high"
 
 
 def _weakest_leaf_confidence(tree: PyramidNode, estimates: list[LeafEstimate]) -> Confidence:

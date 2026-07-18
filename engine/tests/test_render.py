@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from superforecaster.forecaster import ForecastRecord, LeafEstimate, PyramidDetail
-from superforecaster.pyramid import CombinationStep, PruneNote, PyramidNode
+from superforecaster.pyramid import Assumption, CombinationStep, PruneNote, PyramidNode
 from superforecaster.render import render_forecast_html
 
 NOW = datetime(2026, 7, 12, 12, 0, tzinfo=UTC)
@@ -148,6 +148,127 @@ def test_render_pyramid_record_contains_key_content() -> None:
     # Self-contained: no external asset references.
     assert "http://" not in html
     assert "src=" not in html and "<link" not in html
+
+
+def _pyramid_record_with_assumptions() -> ForecastRecord:
+    tree = PyramidNode(
+        id="root",
+        question="Will the whole thing happen?",
+        node_type="conjunction",
+        assumptions=[
+            Assumption(
+                text="The vote happens on schedule",
+                load_bearing=True,
+                verifiability="researchable",
+                status="verified-false",
+                evidence="the vote was postponed to next year",
+                node_id="root",
+            )
+        ],
+        children=[
+            PyramidNode(
+                id="a",
+                question="Will step A happen?",
+                node_type="leaf",
+                grounding="evidence",
+                assumptions=[
+                    Assumption(
+                        text="The agency measures what we think",
+                        load_bearing=True,
+                        verifiability="researchable",
+                        status="verified-true",
+                        evidence="confirmed by the agency methodology page",
+                        node_id="a",
+                    ),
+                    Assumption(
+                        text="No unrelated shock intervenes",
+                        load_bearing=False,
+                        verifiability="unverifiable",
+                        status="unverified",
+                        node_id="a",
+                    ),
+                ],
+            ),
+        ],
+    )
+    detail = PyramidDetail(
+        tree=tree,
+        prune_notes=[],
+        leaf_estimates=[
+            LeafEstimate(
+                node_id="a",
+                question="Will step A happen?",
+                grounding="evidence",
+                probability=0.62,
+                confidence="medium",
+                rationale="Filings suggest progress.",
+                reference_class="comparable mergers",
+                fragility_pull_applied=True,
+                pre_pull_probability=0.7,
+                topup_search_used=True,
+            ),
+        ],
+        combination_steps=[
+            CombinationStep(
+                node_id="root",
+                operation="conjunction",
+                inputs=[0.62],
+                clipped_inputs=[0.62],
+                output=0.62,
+            ),
+            CombinationStep(
+                node_id="a", operation="leaf", inputs=[0.62], clipped_inputs=[0.62], output=0.62
+            ),
+        ],
+        structural_probability=0.62,
+        holistic_probability=0.5,
+        holistic_blend_weight=0.5,
+        weakest_leaf_confidence="medium",
+        structural_holistic_gap=0.5,
+        decompose_failed=False,
+        assumptions=[a for n in (tree, *tree.children) for a in n.assumptions],
+        assumption_verifications_run=2,
+        assumption_search_credits=2,
+        unverified_load_bearing_count=0,
+        leaf_topup_searches_run=1,
+        leaf_topup_search_credits=1,
+        notes=[],
+    )
+    return ForecastRecord(
+        created_at=NOW,
+        question_id=302,
+        post_id=202,
+        title="Will the deal complete?",
+        probability=0.56,
+        raw_probability=0.56,
+        confidence="medium",
+        rationale="Pyramid with assumptions.",
+        reference_class="comparable mergers",
+        model="pyramid-c",
+        input_tokens=400,
+        output_tokens=200,
+        cost_usd=0.05,
+        method="pyramid-c",
+        pyramid=detail,
+    )
+
+
+def test_render_pyramid_assumption_badges_and_indicators() -> None:
+    html = render_forecast_html(_pyramid_record_with_assumptions())
+
+    # All three assumption badge kinds render, each with its glyph and status word.
+    assert "✓ verified-true" in html
+    assert "✗ verified-false" in html
+    assert "○ unverified" in html
+    # The one-line evidence for a verified assumption surfaces.
+    assert "the vote was postponed to next year" in html
+    assert "confirmed by the agency methodology page" in html
+    # Fragility pull and top-up indicators + the verification/retrieval accounting.
+    assert "fragility pull" in html.lower()
+    assert "70%" in html and "62%" in html  # pre-pull -> post-pull
+    assert "Leaf top-up" in html
+    assert "Verification &amp; retrieval budget" in html
+    assert "Unverified load-bearing assumptions" in html
 
 
 def test_render_checklist_record_degrades_gracefully() -> None:

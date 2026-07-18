@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from typer.testing import CliRunner
@@ -48,6 +48,89 @@ def _install_fake(monkeypatch: pytest.MonkeyPatch, posts: list[dict[str, Any]]) 
     monkeypatch.setattr(cli, "_build_client", lambda token: fake)
     monkeypatch.setenv("METACULUS_TOKEN", "test-token")
     return fake
+
+
+def test_pyramid_cached_run_keeps_verification_and_topup_credits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On a CACHED bundle only the bundle's credits are zeroed; fresh verification
+    and leaf-top-up searches (drawn every run) must still be counted (spec §5)."""
+    from datetime import UTC, datetime
+
+    from superforecaster.config import PyramidSettings
+    from superforecaster.forecaster import ForecastRecord, PyramidDetail
+    from superforecaster.pyramid import PyramidNode
+
+    now = datetime(2026, 7, 12, tzinfo=UTC)
+    tree = PyramidNode(id="root", question="Q?", node_type="leaf", grounding="evidence")
+    detail = PyramidDetail(
+        tree=tree,
+        prune_notes=[],
+        leaf_estimates=[],
+        combination_steps=[],
+        structural_probability=0.5,
+        holistic_probability=0.5,
+        holistic_blend_weight=0.5,
+        weakest_leaf_confidence="low",
+        structural_holistic_gap=0.0,
+        decompose_failed=False,
+        assumption_search_credits=2,  # fresh verification draw
+        leaf_topup_search_credits=1,  # fresh top-up draw
+        notes=[],
+    )
+    record = ForecastRecord(
+        created_at=now,
+        question_id=201,
+        post_id=101,
+        title="Q?",
+        probability=0.5,
+        raw_probability=0.5,
+        confidence="low",
+        rationale="r",
+        reference_class="",
+        model="pyramid-c",
+        input_tokens=0,
+        output_tokens=0,
+        cost_usd=None,
+        method="pyramid-c",
+        research_search_credits=3 + 2 + 1,  # bundle 3 + verify 2 + top-up 1
+        pyramid=detail,
+    )
+    monkeypatch.setattr(cli, "run_pyramid_forecast", lambda *a, **k: record)
+
+    to_store: list[ForecastRecord] = []
+    out = cli._forecast_pyramid_question(
+        _minimal_snapshot(now),
+        PyramidSettings(),
+        None,
+        cast(Any, lambda cfg: None),
+        None,  # bundle
+        "cached",
+        search_client=None,
+        now=now,
+        to_store=to_store,
+        failures=[],
+    )
+    assert out is not None
+    # Bundle's 3 credits dropped; the 2 verification + 1 top-up credits survive.
+    assert out.research_search_credits == 3
+    assert to_store[0].research_search_credits == 3
+
+
+def _minimal_snapshot(now: Any) -> Any:
+    from superforecaster.models import QuestionSnapshot
+
+    return QuestionSnapshot(
+        scraped_at=now,
+        post_id=101,
+        question_id=201,
+        title="Q?",
+        description="",
+        resolution_criteria="",
+        fine_print="",
+        scheduled_close_time=now,
+        status="open",
+    )
 
 
 def test_scrape_writes_and_reports(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

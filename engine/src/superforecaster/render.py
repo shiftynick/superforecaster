@@ -54,6 +54,13 @@ h2 { font-size: 1.05rem; margin: 1.75rem 0 0.6rem; border-bottom: 1px solid var(
 .badge.model-knowledge { color: var(--model); border-color: var(--model); }
 .badge.op { color: var(--accent); border-color: var(--accent); }
 .badge.failed { color: #b00020; border-color: #b00020; }
+.badge.verified-true { color: var(--evidence); border-color: var(--evidence); }
+.badge.verified-false { color: #b00020; border-color: #b00020; }
+.badge.unverified { color: var(--muted); border-color: var(--muted); }
+.badge.fragile { color: var(--warn); border-color: var(--warn); }
+.assumptions { list-style: none; margin: 0.35rem 0 0; padding: 0; }
+.assumptions li { font-size: 0.85rem; margin: 0.2rem 0; color: #333; }
+.assumptions .ev { color: var(--muted); }
 .node { border: 1px solid var(--line); border-left: 3px solid var(--accent);
         border-radius: 6px; padding: 0.75rem 0.9rem; margin: 0.6rem 0; background: var(--card); }
 .node.leaf { border-left-color: var(--evidence); }
@@ -141,12 +148,24 @@ def _pyramid_body(record: ForecastRecord) -> str:
     parts.append("<h2>Confidence signals</h2>")
     parts.append(
         f'<p class="meta">Reported confidence <strong>{escape(record.confidence)}</strong> is the '
-        "more cautious of two raw signals (both provisional):</p><ul>"
+        "more cautious of three raw signals (all provisional):</p><ul>"
         f"<li>Weakest leaf confidence on a multiplied path: "
         f"<strong>{escape(detail.weakest_leaf_confidence)}</strong></li>"
         f"<li>Structural-vs-holistic disagreement (log-odds gap): "
         f"<strong>{detail.structural_holistic_gap:.2f}</strong> "
-        "(smaller = the two agree more)</li></ul>"
+        "(smaller = the two agree more)</li>"
+        f"<li>Unverified load-bearing assumptions: "
+        f"<strong>{detail.unverified_load_bearing_count}</strong> "
+        "(more = confidence capped lower)</li></ul>"
+    )
+
+    parts.append("<h2>Verification &amp; retrieval budget</h2>")
+    parts.append(
+        f'<p class="meta">Assumption verifications run: '
+        f"<strong>{detail.assumption_verifications_run}</strong> "
+        f"(search credits {detail.assumption_search_credits}). "
+        f"Leaf top-up searches: <strong>{detail.leaf_topup_searches_run}</strong> "
+        f"(search credits {detail.leaf_topup_search_credits}).</p>"
     )
 
     if detail.decompose_failed:
@@ -193,10 +212,26 @@ def _render_node(
         )
         if estimate is not None:
             failed = ' <span class="badge failed">failed</span>' if estimate.failed else ""
+            fragile = (
+                ' <span class="badge fragile">fragility pull</span>'
+                if estimate.fragility_pull_applied
+                else ""
+            )
             parts.append(
                 f'<span class="prob"><strong>{_pct(estimate.probability)}</strong></span> · '
-                f"confidence {escape(estimate.confidence)}{failed}</p>"
+                f"confidence {escape(estimate.confidence)}{failed}{fragile}</p>"
             )
+            if estimate.fragility_pull_applied and estimate.pre_pull_probability is not None:
+                parts.append(
+                    f'<p class="meta">Fragility pull (unverified load-bearing assumption): '
+                    f"{_pct(estimate.pre_pull_probability)} → {_pct(estimate.probability)} "
+                    "toward 0.5.</p>"
+                )
+            if estimate.topup_search_used:
+                parts.append(
+                    '<p class="meta">Leaf top-up: one extra targeted search was appended '
+                    "(zero bundle coverage).</p>"
+                )
             if estimate.reference_class:
                 parts.append(
                     f'<p class="meta">Anchor / reference class: '
@@ -208,6 +243,8 @@ def _render_node(
             parts.append("(no estimate recorded)</p>")
     else:
         parts.append(f'<p class="meta"><span class="badge op">{escape(node.node_type)}</span></p>')
+
+    parts.append(_render_assumptions(node))
 
     step = steps.get(node.id)
     if step is not None and not is_leaf:
@@ -226,6 +263,36 @@ def _render_node(
 
     parts.append("</div>")
     return "\n".join(parts)
+
+
+_ASSUMPTION_GLYPH = {"verified-true": "✓", "verified-false": "✗", "unverified": "○"}
+
+
+def _render_assumptions(node: PyramidNode) -> str:
+    """Render a node's assumptions as status badges with a one-line evidence note.
+
+    ✓ green (verified-true), ✗ red (verified-false), ○ gray (unverified) —
+    the "which assumption broke?" postmortem view (spec §5). Returns an empty
+    string when the node surfaced no assumptions.
+    """
+    if not node.assumptions:
+        return ""
+    items = ['<ul class="assumptions">']
+    for assumption in node.assumptions:
+        status = assumption.status
+        glyph = _ASSUMPTION_GLYPH.get(status, "○")
+        lb = " · load-bearing" if assumption.load_bearing else ""
+        evidence = (
+            f' — <span class="ev">{escape(assumption.evidence)}</span>'
+            if assumption.evidence
+            else ""
+        )
+        items.append(
+            f'<li><span class="badge {escape(status)}">{glyph} {escape(status)}</span> '
+            f"{escape(assumption.text)}{lb}{evidence}</li>"
+        )
+    items.append("</ul>")
+    return "\n".join(items)
 
 
 def _generic_body(record: ForecastRecord) -> str:

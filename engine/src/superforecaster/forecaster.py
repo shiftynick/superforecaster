@@ -120,6 +120,16 @@ class LeafEstimate(BaseModel):
         failed: ``True`` when the leaf's own LLM pass failed after its retry and
             this is the degraded fallback (probability ``0.5``, confidence
             ``"low"``) rather than a real estimate.
+        fragility_pull_applied: ``True`` when this leaf carried ≥1 unverified
+            load-bearing assumption and its ``probability`` was pulled toward the
+            0.5 anchor (v2 §3). Defaults ``False`` so pre-v2 records still parse.
+        pre_pull_probability: The leaf's probability BEFORE the fragility pull,
+            stored raw so an experiment can re-score with the pull off (the spec's
+            recomputability requirement). ``None`` when no pull was applied — then
+            ``probability`` is already the untouched estimate.
+        topup_search_used: ``True`` when this (evidence) leaf's key terms had zero
+            coverage in the shared bundle and it drew one extra targeted search
+            appended to its context (v2 §4). Defaults ``False``.
     """
 
     node_id: str
@@ -130,6 +140,9 @@ class LeafEstimate(BaseModel):
     rationale: str
     reference_class: str
     failed: bool = False
+    fragility_pull_applied: bool = False
+    pre_pull_probability: float | None = None
+    topup_search_used: bool = False
 
 
 class PyramidDetail(BaseModel):
@@ -175,6 +188,14 @@ class PyramidDetail(BaseModel):
         assumption_search_credits: Metered search credits the verification pass
             drew (folded into the record's ``research_search_credits`` total; kept
             here too so the verification share stays legible).
+        unverified_load_bearing_count: How many surfaced assumptions were both
+            load-bearing AND still ``unverified`` after the verification pass — the
+            third confidence signal (v2 §3) and the count that drives the fragility
+            pull. Defaults ``0`` so pre-v2 records still parse.
+        leaf_topup_searches_run: How many evidence leaves drew an extra targeted
+            top-up search (v2 §4) — ``≤`` ``leaf_topup_max_searches``.
+        leaf_topup_search_credits: Metered search credits the leaf top-up pass drew
+            (folded into ``research_search_credits`` too; kept here for the split).
         notes: Free-form trace notes (decompose fallback, failed leaves, a failed
             holistic pass, verification degrades) — the honest record of every
             degrade that happened.
@@ -193,6 +214,9 @@ class PyramidDetail(BaseModel):
     assumptions: list[Assumption] = Field(default_factory=list)
     assumption_verifications_run: int = 0
     assumption_search_credits: int = 0
+    unverified_load_bearing_count: int = 0
+    leaf_topup_searches_run: int = 0
+    leaf_topup_search_credits: int = 0
     notes: list[str]
 
 

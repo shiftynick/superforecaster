@@ -279,6 +279,24 @@ max_tokens = 16384
 #                           assumptions are verified per question (one search + one
 #                           cheap verdict call each). Load-bearing researchable
 #                           assumptions are verified first. Default 6.
+#   leaf_topup_max_searches      : v2 §4 budget — how many evidence leaves, per
+#                           question, may draw ONE extra targeted search when the
+#                           shared bundle gives their key terms zero coverage.
+#                           Verification has priority (it runs first); top-up uses
+#                           whatever of this budget remains. Default 2; 0 disables.
+#   fragility_pull_weight        : v2 §3 — a leaf carrying >=1 UNVERIFIED
+#                           load-bearing assumption has its probability pulled
+#                           toward 0.5 (maximum uncertainty) by this weight in
+#                           log-odds space. Recomputable: the pre-pull value is
+#                           stored per leaf, so an experiment can re-score with the
+#                           pull off. Default 0.15; 0.0 disables. (Stage 2 pulls
+#                           toward 0.5, not a per-leaf base rate — leaves do not yet
+#                           emit a machine-readable anchor; that is queued.)
+#   unverified_lb_low_cap        : v2 §3 — this many or more unverified load-bearing
+#                           assumptions caps the RECORD's confidence at "low"
+#                           (third confidence signal, combined by the min). Def 2.
+#   unverified_lb_medium_cap     : this many or more caps confidence at "medium"
+#                           (the low cap wins when both fire). Default 1.
 #
 # [pyramid]
 # max_depth = 2
@@ -290,6 +308,10 @@ max_tokens = 16384
 # combination_mode = "guarded-product"
 # max_assumptions_per_node = 8
 # max_assumption_verifications = 6
+# leaf_topup_max_searches = 2
+# fragility_pull_weight = 0.15
+# unverified_lb_low_cap = 2
+# unverified_lb_medium_cap = 1
 
 [retrieval]
 news_provider = "asknews"

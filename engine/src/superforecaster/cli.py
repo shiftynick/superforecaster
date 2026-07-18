@@ -826,8 +826,9 @@ def _forecast_pyramid_question(
     pyramid raised for this question — a failure is isolated to its question like
     the ensemble and single-pass paths. The runner itself degrades model failures
     internally, so a raise here is unusual (e.g. a config problem); it is logged
-    and the loop moves on. A cached bundle's credits are zeroed on the record so a
-    reused bundle is never double-counted.
+    and the loop moves on. On a cached bundle only the *bundle's* credits are
+    subtracted: the verification and leaf-top-up searches are drawn fresh on every
+    run (even a cached one), so their credits must always be counted.
     """
     try:
         record = run_pyramid_forecast(
@@ -848,7 +849,16 @@ def _forecast_pyramid_question(
         return None
 
     if research_state == "cached":
-        record = record.model_copy(update={"research_search_credits": 0})
+        # Zero only the reused bundle's share; keep the fresh verification + top-up
+        # credits (spec §5 / stage-1 known limitation fix). A pyramid record always
+        # carries its detail, but guard defensively.
+        detail = record.pyramid
+        fresh_credits = (
+            detail.assumption_search_credits + detail.leaf_topup_search_credits
+            if detail is not None
+            else 0
+        )
+        record = record.model_copy(update={"research_search_credits": fresh_credits})
     to_store.append(record)
     _echo_pyramid_summary(record, research_state)
     return record

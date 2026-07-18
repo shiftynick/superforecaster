@@ -9,6 +9,32 @@
   "fragility test"), owner direction 2026-07-12 ("break down the nodes based on
   assumptions as well and verify assumptions")
 
+## Build status
+
+- **Stage 1 (MERGED)**: assumption schema (`Assumption`, per-node
+  `assumptions`), the verification pass (`_verify_assumptions`, verdict call,
+  verified-false injection into the owning leaf), budget accounting, and the flat
+  assumption trace on `PyramidDetail`.
+- **Stage 2 (BUILT — this change)**: fragility pull (§3), confidence coupling on
+  the unverified-load-bearing count (§3), per-leaf retrieval top-up (§4), render
+  badges + budget accounting (§5), and the cached-run credit accounting fix
+  (verification + top-up credits are always counted; only the reused bundle's
+  credits are zeroed). Config knobs added: `leaf_topup_max_searches` (2),
+  `fragility_pull_weight` (0.15), `unverified_lb_low_cap` (2),
+  `unverified_lb_medium_cap` (1).
+
+### Stage-2 deviation (recorded honestly)
+
+Spec §3 calls for the fragility pull to drag a fragile leaf toward *its
+outside-view anchor's base rate*. Leaves do not yet emit a machine-readable base
+rate — `ForecastOutput` carries a free-text `reference_class` but no numeric
+anchor — so stage 2 pulls toward **0.5 (maximum uncertainty)** instead: a fragile
+leaf is discounted toward not-knowing rather than toward a specific number we
+cannot read. The pull is recomputable (each leaf stores `pre_pull_probability`),
+so an experiment can re-score with the pull off or, once leaves emit a numeric
+anchor, re-score against the real base rate. Extracting a machine-readable leaf
+anchor is the queued follow-up that lets §3 be honored literally.
+
 ## Goal
 
 v1 decomposes a question into sub-questions. v2 adds the orthogonal axis: every estimate

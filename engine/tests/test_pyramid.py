@@ -442,6 +442,33 @@ def test_pyramid_settings_assumption_defaults() -> None:
     assert settings.max_assumption_verifications == 6
 
 
+def test_pyramid_settings_stage2_defaults() -> None:
+    settings = PyramidSettings()
+    assert settings.leaf_topup_max_searches == 2
+    assert settings.fragility_pull_weight == 0.15
+    assert settings.unverified_lb_low_cap == 2
+    assert settings.unverified_lb_medium_cap == 1
+
+
+def test_load_pyramid_settings_stage2_knobs(tmp_path: Path) -> None:
+    toml = (
+        "[pyramid]\n"
+        "leaf_topup_max_searches = 4\n"
+        "fragility_pull_weight = 0.3\n"
+        "unverified_lb_low_cap = 3\n"
+        "unverified_lb_medium_cap = 2\n"
+    )
+    path = tmp_path / "settings.toml"
+    path.write_text(toml, encoding="utf-8")
+    settings = load_pyramid_settings(path)
+    assert settings.leaf_topup_max_searches == 4
+    assert settings.fragility_pull_weight == 0.3
+    assert settings.unverified_lb_low_cap == 3
+    assert settings.unverified_lb_medium_cap == 2
+    # Untouched knobs keep their defaults.
+    assert settings.max_assumption_verifications == PyramidSettings().max_assumption_verifications
+
+
 def test_load_pyramid_settings_assumption_knobs(tmp_path: Path) -> None:
     toml = "[pyramid]\nmax_assumptions_per_node = 5\nmax_assumption_verifications = 2\n"
     path = tmp_path / "settings.toml"

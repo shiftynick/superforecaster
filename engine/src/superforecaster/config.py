@@ -184,6 +184,23 @@ class PyramidSettings:
             assumptions are verified per question (one search + one verdict call
             each). Load-bearing researchable assumptions are verified first.
             Default ``6``.
+        leaf_topup_max_searches: Budget cap (v2 §4) on how many evidence leaves,
+            per question, may draw ONE extra targeted search when the shared
+            bundle gives their key terms zero coverage. Verification has priority
+            (it runs first); top-up uses whatever of this budget remains. Default
+            ``2``. ``0`` disables leaf top-up.
+        fragility_pull_weight: Weight (v2 §3) by which a leaf carrying ≥1
+            *unverified load-bearing* assumption is pulled toward the maximum-
+            uncertainty anchor (0.5) in log-odds space — the fragility graft. The
+            pull is recomputable: leaves store their pre-pull probability, so an
+            experiment can re-score with the pull off. Default ``0.15``; ``0.0``
+            disables it.
+        unverified_lb_low_cap: Third confidence signal (v2 §3) — this many or more
+            unverified load-bearing assumptions caps the record's confidence at
+            ``"low"``. Default ``2``.
+        unverified_lb_medium_cap: This many or more unverified load-bearing
+            assumptions caps the record's confidence at ``"medium"`` (the low cap
+            takes precedence when both fire). Default ``1``.
     """
 
     max_depth: int = 2
@@ -195,6 +212,10 @@ class PyramidSettings:
     combination_mode: CombinationMode = "guarded-product"
     max_assumptions_per_node: int = 8
     max_assumption_verifications: int = 6
+    leaf_topup_max_searches: int = 2
+    fragility_pull_weight: float = 0.15
+    unverified_lb_low_cap: int = 2
+    unverified_lb_medium_cap: int = 1
 
 
 @dataclass(frozen=True)
@@ -548,6 +569,14 @@ def load_pyramid_settings(path: Path | None = None) -> PyramidSettings:
         ),
         max_assumption_verifications=_int_field(
             table, "max_assumption_verifications", d.max_assumption_verifications
+        ),
+        leaf_topup_max_searches=_int_field(
+            table, "leaf_topup_max_searches", d.leaf_topup_max_searches
+        ),
+        fragility_pull_weight=_float_field(table, "fragility_pull_weight", d.fragility_pull_weight),
+        unverified_lb_low_cap=_int_field(table, "unverified_lb_low_cap", d.unverified_lb_low_cap),
+        unverified_lb_medium_cap=_int_field(
+            table, "unverified_lb_medium_cap", d.unverified_lb_medium_cap
         ),
     )
 
