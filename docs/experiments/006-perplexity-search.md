@@ -49,6 +49,18 @@ records only, never ForecastRecords — no experiment-scoring contamination is p
 ~40 judge calls ≈ $1–2 on the subscription (notional). Hard stop if Perplexity errors
 exceed 5 questions (report partial, do not swap providers mid-run).
 
-## Results
+## Results (2026-07-17, run complete)
 
-*(at completion)*
+- N = 19 scored (1 of 20 failed — within the ≤5 tolerance).
+- **Overall pairwise wins: Perplexity config 12, baseline 7, ties 0 → 63.2% ≥ the
+  pre-committed 60% threshold → Perplexity ADOPTED as default general_provider**
+  (settings.toml changed; ADR-0004 amendment note added).
+- **Validity caveat, disclosed:** the judge chose the second-presented ("Y") bundle in
+  14/19 verdicts (74%) — a position-bias signal. Direction still favors Perplexity
+  (in the Y seat: Perplexity 8/8 vs baseline 6/11; only Perplexity ever won from the
+  X seat, 4 times), but the 63.2% magnitude is likely inflated. Harness improvement
+  queued: pairwise judging in BOTH orders per pair, averaged (docs/specs/research-eval.md
+  amendment). A future re-test with the debiased judge may revisit this adoption;
+  reverting is a one-line config change.
+- Cost: ≈ $0.20 Perplexity, ~75 AskNews credits, ~$8 notional judge quota
+  (higher than estimated — two fresh bundles + Sonnet judge per question).

@@ -90,3 +90,11 @@ extraction), with cents-per-day worst case if paid fallbacks engage.
   protocol makes that a config change.
 - Date filters are trusted as leakage *reducers* only; the harness's leakage labels
   (docs/02) stay load-bearing, and postmortems should spot-check retrieved sources' dates.
+
+## Amendment 2026-07-17 (experiment 006)
+
+The general-web provider changed tavily → **perplexity** (the raw Search API, not
+Sonar) per experiment 006's pre-registered rule: 63.2% blinded pairwise bundle win
+rate over 19 questions (≥60% threshold). See the experiment's Results for the
+position-bias caveat and the queued both-orders judging fix; reverting is a config
+change. Tavily remains wired and free as the fallback.

@@ -82,3 +82,10 @@ call per comparison. A 20-question provider comparison ≈ $1–2.
 |---|---|
 | R1 | Harness built + demo: eval-research on 3 real cached bundles, owner skims the rubric outputs for face validity |
 | R2 | Perplexity comparison designed (own experiment doc) — owner freezes |
+
+## Amendment 2026-07-17 (from experiment 006's validity caveat)
+
+Queued harness improvement: pairwise judging must run each pair in BOTH X/Y orders
+(two calls) and average/require-agreement — experiment 006's judge picked the
+second-presented bundle 74% of the time, inflating (though not reversing) the
+measured win rate. Until built, single-order pairwise verdicts carry this caveat.

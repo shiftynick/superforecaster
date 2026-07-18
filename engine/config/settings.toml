@@ -340,7 +340,9 @@ max_tokens = 16384
 
 [retrieval]
 news_provider = "asknews"
-general_provider = "tavily"
+general_provider = "perplexity"       # adopted per experiment 006 (63.2% blinded
+                                      # pairwise win rate vs tavily; see the
+                                      # position-bias caveat in its Results)
 max_results = 5
 max_fetches_per_question = 8
 asknews_monthly_credit_cap = 900
