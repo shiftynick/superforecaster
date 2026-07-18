@@ -54,6 +54,18 @@ from .pyramid_runner import run_pyramid_forecast
 from .render import render_forecast_html
 from .research import ResearchBundle, run_research
 from .research_cache import ResearchCache
+from .research_eval import (
+    BundleEvalRecord,
+    BundleEvalStore,
+    BundleMetrics,
+    PairwiseRecord,
+    bundle_fingerprint,
+    compute_metrics,
+    load_bundle_judge_config,
+    run_pairwise_judge,
+    run_rubric_judge,
+    summarize_retrieval,
+)
 from .search import SearchClient, build_search_client, read_asknews_credits_used
 from .store import SnapshotStore
 from .submission import SubmissionClient, SubmissionError
@@ -279,6 +291,16 @@ def _build_research_llm() -> LlmClient | None:
 
     Mirrors :func:`_build_llm_client`: tests monkeypatch this to inject a fake
     that returns a queries JSON object, distinct from the forecast-pass fake.
+    """
+    return None
+
+
+# Seam for tests: monkeypatched to inject a fake bundle-judge LLM client.
+def _build_bundle_judge_llm() -> LlmClient | None:
+    """Return ``None`` so the eval commands build the judge client themselves.
+
+    Mirrors :func:`_build_llm_client`: tests monkeypatch this to inject a fake that
+    returns a rubric/pairwise JSON object, distinct from the forecast-pass fake.
     """
     return None
 
@@ -967,20 +989,28 @@ class _ResearchContext:
                 closer()
 
 
-def _open_research_context(snapshot_dir: Path) -> _ResearchContext:
-    """Build the research clients from settings, keyed to the data-root quota file."""
+def _open_research_context(
+    snapshot_dir: Path, settings: RetrievalSettings | None = None
+) -> _ResearchContext:
+    """Build the research clients from settings, keyed to the data-root quota file.
+
+    ``settings`` defaults to the current ``[retrieval]`` config; passing explicit
+    settings (loaded from an alt config path) is how ``compare-research`` builds
+    the alternative bundle under a different retrieval config without mutating the
+    ``SUPERFORECASTER_CONFIG`` env var mid-process.
+    """
     # The search keys live in .env; the token helpers load it for their commands,
     # but a dry-run forecast never calls those — load it here too.
     _load_dotenv(Path("engine/.env"))
     _load_dotenv(Path(".env"))
-    settings = load_retrieval_settings()
+    retrieval = settings if settings is not None else load_retrieval_settings()
     data_root = snapshot_dir.parent
-    news, general = _build_search_clients(settings, data_root)
-    extractor = _build_extractor(settings)
+    news, general = _build_search_clients(retrieval, data_root)
+    extractor = _build_extractor(retrieval)
     llm = _build_research_llm()
     if llm is None:
         llm = build_llm_client(load_task_config("query_gen"))
-    return _ResearchContext(llm, news, general, extractor, settings)
+    return _ResearchContext(llm, news, general, extractor, retrieval)
 
 
 @app.command("submit-tournament")
@@ -1298,6 +1328,280 @@ def render_forecast(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(html, encoding="utf-8")
     typer.echo(f"render-forecast: wrote {out_path}")
+
+
+_AltConfigOption = typer.Option(
+    ...,
+    "--alt-config",
+    help=(
+        "Path to an alternative settings.toml. Bundle A is built under the current "
+        "settings, bundle B under this one (differing only in retrieval providers) "
+        "— the Perplexity test's entry point."
+    ),
+)
+
+
+def _resolve_bundle_eval_dir(data_dir: Path | None) -> Path:
+    """Pick the bundle-eval directory.
+
+    With an explicit ``--data-dir`` the eval records sit beside the snapshots under
+    the same data root (``<data-dir>/../bundle-evals``), so a test's artifacts stay
+    together. Otherwise the config default (``[data] bundle_eval_dir``) is used.
+    """
+    if data_dir is not None:
+        return data_dir.parent / "bundle-evals"
+    return load_settings().data.bundle_eval_dir
+
+
+def _snapshot_for_post(snap_store: SnapshotStore, post_id: int) -> QuestionSnapshot | None:
+    """Return the latest snapshot for a post id, or ``None`` if untracked."""
+    by_post = {s.post_id: s for s in snap_store.latest_by_question().values()}
+    return by_post.get(post_id)
+
+
+def _bundle_for_eval(
+    snapshot: QuestionSnapshot,
+    snap_dir: Path,
+    *,
+    fresh: bool,
+    now: datetime,
+    settings: RetrievalSettings | None = None,
+) -> ResearchBundle | None:
+    """Load a cached bundle for a question, or build a fresh one under ``settings``.
+
+    With ``fresh=False`` the bundle is read from the research cache (the one the
+    ``forecast`` command fills); a miss returns ``None`` so the caller can report
+    it. With ``fresh=True`` a new bundle is researched (and cached) under
+    ``settings`` (defaulting to the current ``[retrieval]`` config).
+    """
+    if not fresh:
+        cache = ResearchCache(snap_dir.parent / "research")
+        return cache.load(snapshot.question_id, max_age=timedelta.max, now=now)
+
+    research_ctx = _open_research_context(snap_dir, settings)
+    try:
+        bundle = run_research(
+            snapshot,
+            research_ctx.llm,
+            research_ctx.news,
+            research_ctx.general,
+            research_ctx.extractor,
+            research_ctx.settings,
+            now=now,
+        )
+    finally:
+        research_ctx.close()
+    ResearchCache(snap_dir.parent / "research").save(snapshot.question_id, bundle)
+    return bundle
+
+
+@app.command("eval-research")
+def eval_research(
+    post_id: int = typer.Option(..., "--post-id", help="The post id whose bundle to evaluate."),
+    fresh: bool = typer.Option(
+        False,
+        "--fresh/--cached",
+        help=(
+            "Build a fresh research bundle under the current settings (spends "
+            "search credits), or evaluate the cached bundle from a prior run "
+            "(default)."
+        ),
+    ),
+    data_dir: Path | None = _DataDirOption,
+) -> None:
+    """Evaluate one question's research bundle: mechanical metrics + a rubric judge.
+
+    Loads (or freshly builds) the bundle for ``--post-id``, computes the free
+    mechanical metrics, runs the one-call rubric judge over a provider-blinded
+    rendering, stores a :class:`BundleEvalRecord`, and echoes a summary line with
+    the five dimension scores.
+    """
+    snap_dir = _resolve_data_dir(data_dir)
+    snap_store = SnapshotStore(snap_dir)
+    snapshot = _snapshot_for_post(snap_store, post_id)
+    if snapshot is None:
+        typer.echo(f"eval-research: no tracked snapshot for post {post_id}.", err=True)
+        raise typer.Exit(code=1)
+
+    judge_config = load_bundle_judge_config()
+    check_configs = [judge_config]
+    if fresh:
+        check_configs.append(load_task_config("query_gen"))
+    _require_llm_cli(check_configs)
+
+    now = datetime.now(UTC)
+    bundle = _bundle_for_eval(snapshot, snap_dir, fresh=fresh, now=now)
+    if bundle is None:
+        typer.echo(
+            f"eval-research: no cached research bundle for post {post_id} "
+            f"(question {snapshot.question_id}); re-run with --fresh to build one.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    metrics = compute_metrics(snapshot, bundle, now=now)
+    retrieval = load_retrieval_settings()
+    judge_client = _build_bundle_judge_llm()
+    try:
+        result = run_rubric_judge(snapshot, bundle, client=judge_client, config=judge_config)
+    except LlmError as exc:
+        typer.echo(f"eval-research: rubric judge FAILED ({exc})", err=True)
+        raise typer.Exit(code=1) from exc
+
+    record = BundleEvalRecord(
+        created_at=now,
+        question_id=snapshot.question_id,
+        post_id=snapshot.post_id,
+        title=snapshot.title,
+        kind="rubric",
+        bundle_fingerprint=bundle_fingerprint(bundle),
+        retrieval=summarize_retrieval(retrieval),
+        metrics=metrics,
+        rubric=result.judgment,
+        judge_model=result.model,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        cost_usd=result.cost_usd,
+    )
+    BundleEvalStore(_resolve_bundle_eval_dir(data_dir)).append([record])
+    _echo_rubric_summary(record)
+
+
+def _echo_rubric_summary(record: BundleEvalRecord) -> None:
+    """Print one eval-research result line (metrics headline + rubric scores)."""
+    m = record.metrics
+    cost = "n/a" if record.cost_usd is None else f"${record.cost_usd:.4f}"
+    typer.echo(
+        f"q{record.question_id} (post {record.post_id}): "
+        f"results={m.result_count} domains={m.unique_domains} "
+        f"docs_ok={m.doc_ok_count}/{m.doc_count} "
+        f"coverage={m.key_terms_covered}/{m.key_terms_total} "
+        f"resolution_source={'yes' if m.resolution_source_present else 'no'} "
+        f"credits={m.search_credits_used} cost={cost}"
+    )
+    j = record.rubric
+    if j is not None:
+        typer.echo(
+            f"    rubric: coverage={j.coverage} source_quality={j.source_quality} "
+            f"recency={j.recency} relevance={j.relevance} "
+            f"resolution_grounding={j.resolution_grounding} overall={j.overall}"
+        )
+        typer.echo(f"    missing: {j.missing}")
+
+
+@app.command("compare-research")
+def compare_research(
+    post_id: int = typer.Option(..., "--post-id", help="The post id whose bundles to compare."),
+    alt_config: Path = _AltConfigOption,
+    data_dir: Path | None = _DataDirOption,
+) -> None:
+    """Compare two research bundles for one question: metrics on both + blinded pairwise.
+
+    Builds bundle A under the current settings and bundle B under ``--alt-config``
+    (both fresh, at the same moment), computes metrics on each, runs one blinded
+    pairwise judge (X/Y assignment randomized and recorded), stores an eval record
+    for each bundle (the verdict attached to A), and echoes a summary.
+    """
+    snap_dir = _resolve_data_dir(data_dir)
+    snap_store = SnapshotStore(snap_dir)
+    snapshot = _snapshot_for_post(snap_store, post_id)
+    if snapshot is None:
+        typer.echo(f"compare-research: no tracked snapshot for post {post_id}.", err=True)
+        raise typer.Exit(code=1)
+
+    judge_config = load_bundle_judge_config()
+    _require_llm_cli([judge_config, load_task_config("query_gen")])
+
+    settings_a = load_retrieval_settings()
+    # Load the alt retrieval config straight from its path — no env mutation.
+    settings_b = load_retrieval_settings(alt_config)
+
+    now = datetime.now(UTC)
+    bundle_a = _bundle_for_eval(snapshot, snap_dir, fresh=True, now=now, settings=settings_a)
+    bundle_b = _bundle_for_eval(snapshot, snap_dir, fresh=True, now=now, settings=settings_b)
+    assert bundle_a is not None and bundle_b is not None  # fresh always builds
+
+    metrics_a = compute_metrics(snapshot, bundle_a, now=now)
+    metrics_b = compute_metrics(snapshot, bundle_b, now=now)
+
+    judge_client = _build_bundle_judge_llm()
+    try:
+        result = run_pairwise_judge(
+            snapshot, bundle_a, bundle_b, client=judge_client, config=judge_config, now=now
+        )
+    except LlmError as exc:
+        typer.echo(f"compare-research: pairwise judge FAILED ({exc})", err=True)
+        raise typer.Exit(code=1) from exc
+
+    fp_a = bundle_fingerprint(bundle_a)
+    fp_b = bundle_fingerprint(bundle_b)
+    summary_a = summarize_retrieval(settings_a)
+    summary_b = summarize_retrieval(settings_b)
+    # The randomization mapping is stored relative to A (this record's own bundle):
+    # A was shown as X iff the judge's X was bundle A.
+    pairwise = PairwiseRecord(
+        verdict=result.verdict,
+        x_source="self" if result.x_source == "a" else "other",
+        other_fingerprint=fp_b,
+        other_retrieval=summary_b,
+    )
+    record_a = BundleEvalRecord(
+        created_at=now,
+        question_id=snapshot.question_id,
+        post_id=snapshot.post_id,
+        title=snapshot.title,
+        kind="pairwise",
+        bundle_fingerprint=fp_a,
+        retrieval=summary_a,
+        metrics=metrics_a,
+        pairwise=pairwise,
+        judge_model=result.model,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        cost_usd=result.cost_usd,
+    )
+    record_b = BundleEvalRecord(
+        created_at=now,
+        question_id=snapshot.question_id,
+        post_id=snapshot.post_id,
+        title=snapshot.title,
+        kind="pairwise",
+        bundle_fingerprint=fp_b,
+        retrieval=summary_b,
+        metrics=metrics_b,
+    )
+    BundleEvalStore(_resolve_bundle_eval_dir(data_dir)).append([record_a, record_b])
+    _echo_pairwise_summary(record_a, metrics_b)
+
+
+def _echo_pairwise_summary(record_a: BundleEvalRecord, metrics_b: BundleMetrics) -> None:
+    """Print one compare-research result line (both bundles' headline + winners)."""
+    ma = record_a.metrics
+    pr = record_a.pairwise
+    cost = "n/a" if record_a.cost_usd is None else f"${record_a.cost_usd:.4f}"
+    ra = record_a.retrieval
+    other = pr.other_retrieval if pr is not None else ra
+    typer.echo(f"q{record_a.question_id} (post {record_a.post_id}): comparing research")
+    typer.echo(
+        f"    A [{ra.news_provider}/{ra.general_provider}]: results={ma.result_count} "
+        f"domains={ma.unique_domains} docs_ok={ma.doc_ok_count}/{ma.doc_count} "
+        f"coverage={ma.key_terms_covered}/{ma.key_terms_total}"
+    )
+    mb = metrics_b
+    typer.echo(
+        f"    B [{other.news_provider}/{other.general_provider}]: results={mb.result_count} "
+        f"domains={mb.unique_domains} docs_ok={mb.doc_ok_count}/{mb.doc_count} "
+        f"coverage={mb.key_terms_covered}/{mb.key_terms_total}"
+    )
+    if pr is not None:
+        v = pr.verdict
+        x_is = "A" if pr.x_source == "self" else "B"
+        typer.echo(
+            f"    pairwise (X={x_is}): coverage={v.coverage} source_quality={v.source_quality} "
+            f"recency={v.recency} relevance={v.relevance} "
+            f"resolution_grounding={v.resolution_grounding} overall={v.overall} cost={cost}"
+        )
+        typer.echo(f"    reason: {v.reason}")
 
 
 if __name__ == "__main__":  # pragma: no cover

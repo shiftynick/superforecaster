@@ -51,6 +51,7 @@ _DEFAULT_FORECAST_DIR = "./data/forecasts"
 _DEFAULT_LIVE_TOURNAMENT = "summer-futureeval-2026"
 _DEFAULT_SANDBOX_TOURNAMENT = "bot-testing-area"
 _DEFAULT_WEB_RESOLUTION_DIR = "./data/web-resolutions"
+_DEFAULT_BUNDLE_EVAL_DIR = "./data/bundle-evals"
 
 
 @dataclass(frozen=True)
@@ -227,11 +228,14 @@ class DataSettings:
         forecast_dir: Directory of forecast records.
         web_resolution_dir: Directory of web-scraped resolution records (the
             gap-filler that reads outcomes off the public Metaculus pages).
+        bundle_eval_dir: Directory of research-bundle evaluation records (the
+            research-quality yardstick's rubric + pairwise verdicts).
     """
 
     snapshot_dir: Path
     forecast_dir: Path
     web_resolution_dir: Path = Path("./data/web-resolutions")
+    bundle_eval_dir: Path = Path("./data/bundle-evals")
 
 
 @dataclass(frozen=True)
@@ -603,6 +607,7 @@ def load_settings(path: Path | None = None) -> Settings:
         web_resolution_dir=Path(
             _str_field(data_table, "web_resolution_dir", _DEFAULT_WEB_RESOLUTION_DIR)
         ),
+        bundle_eval_dir=Path(_str_field(data_table, "bundle_eval_dir", _DEFAULT_BUNDLE_EVAL_DIR)),
     )
     tournament = TournamentSettings(
         live=_str_field(tournament_table, "live", _DEFAULT_LIVE_TOURNAMENT),
