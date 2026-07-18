@@ -326,3 +326,18 @@ def test_run_research_counts_failed_extraction_as_none_tier() -> None:
     bundle = _run(llm, news, general, extractor, settings)
 
     assert bundle.tier_stats == {TIER_NONE: 1}
+
+
+def test_run_research_caps_news_queries() -> None:
+    """AskNews (metered) runs only on the first news_max_queries; general on all."""
+    llm = _FakeLlm(_llm_result(_queries_json("q1", "q2", "q3")))
+    news = _FakeSearch([_result("https://news.example/a", provider="asknews")], credits_per_call=1)
+    general = _FakeSearch([_result("https://web.example/b")])
+    extractor = _FakeExtractor()
+    settings = RetrievalSettings(news_max_queries=2)
+
+    bundle = _run(llm, news, general, extractor, settings)
+
+    assert news.queries == ["q1", "q2"]  # metered provider capped at 2
+    assert general.queries == ["q1", "q2", "q3"]  # general covers every query
+    assert bundle.search_credits_used == 2  # 2 news calls x 1 credit

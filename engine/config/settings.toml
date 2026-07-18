@@ -175,6 +175,14 @@ output_per_mtok = 15.0
 #                                "perplexity" — the Perplexity Search API — is under
 #                                evaluation in experiment 006).
 #   max_results                : results requested per search call.
+#   news_max_queries           : how many of a question's 2-4 generated queries go
+#                                to the METERED news provider (AskNews = 1 credit
+#                                per query). The general provider still covers every
+#                                query; this caps only the metered one. Default 2 —
+#                                news queries for one question are highly correlated,
+#                                so the first two capture most of the value at ~half
+#                                the credit cost. Set 1 to save more, 0 for
+#                                general-only (no AskNews).
 #   max_fetches_per_question   : cap on content fetches per forecast question.
 #   asknews_monthly_credit_cap : hard monthly AskNews credit cap; the client
 #                                refuses to call once exceeding it. 900 leaves

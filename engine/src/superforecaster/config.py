@@ -264,6 +264,11 @@ class RetrievalSettings:
             (``"tavily"``, or ``"perplexity"`` — the Perplexity Search API, under
             evaluation in experiment 006).
         max_results: Default number of results to request per search call.
+        news_max_queries: How many of a question's generated queries are sent to
+            the metered news provider (AskNews charges 1 credit per query). The
+            general provider still covers every query; this caps only the metered
+            one. Default 2 — news queries for one question are highly correlated,
+            so the first two capture most of the value at a fraction of the cost.
         max_fetches_per_question: Cap on content fetches per forecast question
             (a budget guard used by the slice-2 research pipeline).
         asknews_monthly_credit_cap: Hard monthly cap on AskNews credits; the
@@ -286,6 +291,7 @@ class RetrievalSettings:
     news_provider: str = "asknews"
     general_provider: str = "tavily"
     max_results: int = 5
+    news_max_queries: int = 2
     max_fetches_per_question: int = 8
     asknews_monthly_credit_cap: int = 900
     extract_min_chars: int = 500
@@ -433,6 +439,7 @@ def load_retrieval_settings(path: Path | None = None) -> RetrievalSettings:
         news_provider=_str_field(table, "news_provider", d.news_provider),
         general_provider=_str_field(table, "general_provider", d.general_provider),
         max_results=_int_field(table, "max_results", d.max_results),
+        news_max_queries=_int_field(table, "news_max_queries", d.news_max_queries),
         max_fetches_per_question=_int_field(
             table, "max_fetches_per_question", d.max_fetches_per_question
         ),

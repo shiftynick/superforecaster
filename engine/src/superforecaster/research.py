@@ -308,8 +308,13 @@ def run_research(
     credits_before = _credits_used(news_client)
     news_quota_exhausted = False
     raw_results: list[SearchResult] = []
-    for query in queries:
-        if not news_quota_exhausted:
+    for index, query in enumerate(queries):
+        # The news provider (AskNews) is metered — 1 credit per query — while the
+        # general provider is cheap/flat-rate. News queries for one question are
+        # highly correlated, so we cap the metered provider at the first
+        # ``news_max_queries`` queries and let the general provider cover the rest.
+        news_allowed = index < settings.news_max_queries
+        if news_allowed and not news_quota_exhausted:
             try:
                 raw_results.extend(news_client.search(query, max_results=settings.max_results))
             except SearchQuotaError:
