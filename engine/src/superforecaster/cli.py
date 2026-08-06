@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -40,6 +41,7 @@ from .config import (
 from .dotenv import load_dotenv as _load_dotenv
 from .ensemble import EnsembleResult, pooled_forecast_record, run_ensemble
 from .experiments import (
+    DEFAULT_EXPERIMENTS_DIR,
     ExperimentManifest,
     ExperimentStatus,
     compute_status,
@@ -472,6 +474,133 @@ def _web_resolution_pass(store: SnapshotStore, data_dir: Path | None) -> None:
 
     web_store.append(found)
     typer.echo(f"update-resolutions (web): checked={checked} found={len(found)} failed={failed}")
+
+
+_ExperimentsDirOption = typer.Option(
+    None,
+    "--experiments-dir",
+    help="Directory of experiment manifests (*.toml/*.md). Defaults to ./docs/experiments.",
+)
+
+
+# A pinned-question-id line: PURELY digits/commas/whitespace, with an optional
+# trailing period (the doc convention: a wrapped list ending the sentence). Prose
+# lines mix digits with words and never match, so this is safe to run over every
+# doc in the directory, not just the doc-only experiments.
+_DOC_ID_LIST_LINE_RE = re.compile(r"^\s*\d[\d,\s]*\.?\s*$")
+_DOC_ID_RE = re.compile(r"\d{4,6}")
+
+
+def _pinned_ids_from_docs(directory: Path) -> set[int]:
+    """Collect pinned question ids recorded only in a doc, not a `.toml` manifest.
+
+    Some pre-registered experiments (005-effort-levels, 006-perplexity-search) pin
+    their question set solely in their markdown doc — no manifest is registered
+    because their machinery (a script-scored effort comparison; a bundle-eval-only
+    pairwise judge) isn't the arm-matching `.toml` shape (each doc's own
+    "Machinery note" / "No `.toml` manifest is registered" line explains why).
+
+    Rather than hardcoding those ids, this scans every ``*.md`` file in
+    ``directory`` for lines that are a comma-separated list of 4-6 digit numbers
+    (Metaculus question ids) and nothing else, e.g.::
+
+        43716, 43507, 44373, 43892, 44422, 43873, 44011, 44017, 44256, 35710,
+        44139, 44698, 43852, 44248, 43854, 39432, 43522, 43506, 44250, 43737.
+
+    This also picks up 001's and 002's own id lists from their docs, which is
+    harmless — they are identical to those experiments' ``.toml`` manifests, so
+    the union below is a no-op for them. Returns an empty set if the directory
+    does not exist.
+    """
+    ids: set[int] = set()
+    if not directory.exists():
+        return ids
+    for path in sorted(directory.glob("*.md")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if _DOC_ID_LIST_LINE_RE.match(line):
+                ids.update(int(m) for m in _DOC_ID_RE.findall(line))
+    return ids
+
+
+_SweepMaxOption = typer.Option(
+    25,
+    "--max",
+    help=(
+        "Max pages to read this run. Kept small so a run stays short and safely "
+        "re-runnable — the web-resolution store's dedupe (already-resolved "
+        "questions are skipped) means a later run just resumes."
+    ),
+)
+_SweepThrottleOption = typer.Option(
+    _WEB_THROTTLE_SECONDS,
+    "--throttle-seconds",
+    help="Seconds to sleep between page loads (politeness throttle).",
+)
+
+
+@app.command("sweep-resolutions")
+def sweep_resolutions(
+    max_pages: int = _SweepMaxOption,
+    throttle_seconds: float = _SweepThrottleOption,
+    data_dir: Path | None = _DataDirOption,
+    experiments_dir: Path | None = _ExperimentsDirOption,
+) -> None:
+    """Read resolutions for every PINNED experiment question via the public-page web reader.
+
+    Unlike ``update-resolutions --from-web`` (which only mops up gaps left by an
+    API pass over the WHOLE tracked set), this sweeps the pinned question set of
+    every pre-registered experiment directly and ONLY via the public-page web
+    reader — never the Metaculus API, which both 429s at this volume and hides
+    the ``resolution`` field behind account access.
+
+    Pinned ids are the union of every manifest-backed experiment's question set
+    (``docs/experiments/*.toml``, via :func:`load_manifests`) and every doc-only
+    experiment's question set (see :func:`_pinned_ids_from_docs`). Each pinned id
+    is mapped to its post id via the snapshot store's latest snapshot; ids with no
+    tracked snapshot are silently unmapped (not an error — a question outside the
+    scrape window just can't be checked here). Questions already resolved in the
+    web-resolution store are skipped. Remaining questions are read from their
+    public page, throttled and capped at ``--max`` pages; a reader error on one
+    question is logged and the sweep continues rather than aborting.
+    """
+    manifests = load_manifests(experiments_dir)
+    manifest_ids: set[int] = set()
+    for manifest in manifests:
+        manifest_ids |= manifest.pinned
+    docs_dir = experiments_dir if experiments_dir is not None else Path(DEFAULT_EXPERIMENTS_DIR)
+    pinned = manifest_ids | _pinned_ids_from_docs(docs_dir)
+
+    snap_store = SnapshotStore(_resolve_data_dir(data_dir))
+    latest = snap_store.latest_by_question()
+    by_qid = {qid: latest[qid].post_id for qid in pinned if qid in latest}
+
+    web_store = WebResolutionStore(_resolve_web_resolution_dir(data_dir))
+    already = {qid for qid, r in web_store.latest_by_question().items() if r.resolution}
+
+    todo = sorted(qid for qid in by_qid if qid not in already)[:max_pages]
+
+    loader = _build_web_page_loader()
+    found: list[WebResolution] = []
+    for i, question_id in enumerate(todo):
+        if i > 0:
+            _web_sleep(throttle_seconds)
+        post_id = by_qid[question_id]
+        try:
+            resolution = fetch_resolution(post_id, page_loader=loader, question_id=question_id)
+        except Exception as exc:
+            # One bad page must never sink the sweep.
+            typer.echo(f"q{question_id} (post {post_id}): web-resolution FAILED ({exc})", err=True)
+            continue
+        if resolution is None:
+            continue
+        web_store.append([resolution])
+        found.append(resolution)
+        typer.echo(f"q{question_id}: RESOLVED {resolution.resolution!r}")
+
+    typer.echo(
+        f"sweep-resolutions: pinned={len(pinned)} mapped={len(by_qid)} "
+        f"already={len(already)} checked={len(todo)} found={len(found)}"
+    )
 
 
 @app.command()
@@ -1278,13 +1407,6 @@ def _echo_forecast_line(record: ForecastRecord, status: str) -> None:
         f"q{record.question_id} (post {record.post_id}): "
         f"p={record.probability:.2f} confidence={record.confidence} cost={cost} [{status}]"
     )
-
-
-_ExperimentsDirOption = typer.Option(
-    None,
-    "--experiments-dir",
-    help="Directory of experiment manifests (*.toml). Defaults to ./docs/experiments.",
-)
 
 
 def _refresh_pinned_resolutions(
