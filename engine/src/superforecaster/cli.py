@@ -26,10 +26,12 @@ import typer
 
 from .config import (
     EnsembleSettings,
+    MarketCorpusSettings,
     PyramidSettings,
     RetrievalSettings,
     TaskModelConfig,
     load_ensemble_settings,
+    load_market_corpus_settings,
     load_pyramid_settings,
     load_retrieval_settings,
     load_settings,
@@ -48,6 +50,13 @@ from .extract import Extractor, build_extractor
 from .forecast_store import ForecastStore
 from .forecaster import ForecastRecord, run_forecast_pass
 from .llm import LlmClient, LlmError, build_llm_client, check_provider_cli
+from .market_corpus import (
+    MarketClient,
+    MarketCorpusStore,
+    MarketQuestion,
+    build_market_client,
+    filtered,
+)
 from .metaculus import MetaculusClient
 from .models import QuestionSnapshot, SkipPost
 from .pyramid_runner import run_pyramid_forecast
@@ -484,6 +493,123 @@ def stats(data_dir: Path | None = _DataDirOption) -> None:
     used = read_asknews_credits_used(snap_dir.parent)
     cap = retrieval.asknews_monthly_credit_cap
     typer.echo(f"asknews credits:    {used}/{cap} (this month)")
+
+
+def _resolve_market_corpus_dir(data_dir: Path | None) -> Path:
+    """Pick the market-corpus directory.
+
+    With an explicit ``--data-dir`` the corpus files sit beside the snapshots under
+    the same data root (``<data-dir>/../market-corpus``), so a test's artifacts stay
+    together (mirrors :func:`_resolve_web_resolution_dir`). Otherwise the corpus lands
+    under the config data root (``<snapshot_dir>/../market-corpus`` -> the
+    ``./data/market-corpus`` the spec names).
+    """
+    if data_dir is not None:
+        return data_dir.parent / "market-corpus"
+    return load_settings().data.snapshot_dir.parent / "market-corpus"
+
+
+# Seam for tests: monkeypatched to inject a fake market client (no network).
+def _build_market_client(platform: str, settings: MarketCorpusSettings) -> MarketClient:
+    """Construct the real market client for a platform. Tests replace this seam."""
+    return build_market_client(platform, settings=settings)
+
+
+_MarketPlatformOption = typer.Option(
+    "both",
+    "--platform",
+    help="Which market(s) to pull: 'polymarket', 'manifold', or 'both'.",
+)
+_MarketMaxOption = typer.Option(
+    300,
+    "--max",
+    help="Max resolved-binary markets to pull PER platform (before filtering).",
+)
+
+
+@app.command("build-market-corpus")
+def build_market_corpus(
+    platform: str = _MarketPlatformOption,
+    max_markets: int = _MarketMaxOption,
+    data_dir: Path | None = _DataDirOption,
+) -> None:
+    """Pull resolved binary markets, run mechanical quality filters, and store them.
+
+    Read-only public APIs (Polymarket Gamma + Manifold v0, no auth): each platform
+    is paginated for up to ``--max`` resolved binaries, every parsed market is
+    filtered (criteria length, volume/bettors, Manifold self-resolution) with its
+    pass/fail outcome recorded on the record, and ALL parsed markets — kept and
+    dropped alike — are appended (deduped by id) to ``data/market-corpus/<platform>``.
+    A per-platform stats line reports pulled / parsed / kept / dropped-by-reason,
+    the resolution date range, and median volume.
+    """
+    if platform not in ("polymarket", "manifold", "both"):
+        typer.echo(
+            f"build-market-corpus: --platform must be polymarket|manifold|both, got {platform!r}.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    settings = load_market_corpus_settings()
+    store = MarketCorpusStore(_resolve_market_corpus_dir(data_dir))
+    platforms = ["polymarket", "manifold"] if platform == "both" else [platform]
+
+    for plat in platforms:
+        client = _build_market_client(plat, settings)
+        records: list[MarketQuestion] = []
+        try:
+            for record in client.iter_resolved_binaries(max_markets):
+                records.append(filtered(record, settings))
+        finally:
+            client.close()
+
+        written = store.append(records)
+        _echo_market_corpus_summary(
+            plat,
+            pulled=getattr(client, "pulled_count", len(records)),
+            skipped=getattr(client, "skipped_count", 0),
+            records=records,
+            written=written,
+        )
+
+
+def _echo_market_corpus_summary(
+    platform: str,
+    *,
+    pulled: int,
+    skipped: int,
+    records: list[MarketQuestion],
+    written: int,
+) -> None:
+    """Print one platform's pull stats: counts, dropped-by-reason, dates, median volume."""
+    parsed = len(records)
+    kept = [r for r in records if r.kept]
+    dropped = [r for r in records if not r.kept]
+
+    reason_counts: dict[str, int] = {}
+    for record in dropped:
+        for reason in record.filters_failed:
+            name = reason.split(":", 1)[0]
+            reason_counts[name] = reason_counts.get(name, 0) + 1
+
+    res_times = sorted(r.resolution_time for r in kept if r.resolution_time is not None)
+    if res_times:
+        date_range = f"{res_times[0].date().isoformat()}..{res_times[-1].date().isoformat()}"
+    else:
+        date_range = "n/a"
+
+    volumes = sorted(r.volume for r in kept if r.volume is not None)
+    median_vol = f"{volumes[len(volumes) // 2]:.0f}" if volumes else "n/a"
+
+    typer.echo(
+        f"build-market-corpus [{platform}]: pulled={pulled} parsed={parsed} "
+        f"skipped_at_parse={skipped} kept={len(kept)} dropped={len(dropped)} "
+        f"written={written}"
+    )
+    if reason_counts:
+        by_reason = " ".join(f"{name}={count}" for name, count in sorted(reason_counts.items()))
+        typer.echo(f"    dropped by: {by_reason}")
+    typer.echo(f"    kept resolution dates: {date_range}   median volume: {median_vol}")
 
 
 _ForecastDirOption = typer.Option(

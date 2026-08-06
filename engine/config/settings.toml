@@ -359,3 +359,40 @@ extract_min_words = 80
 max_doc_chars = 8000
 timeout_seconds = 20.0
 reuse_research_max_age_hours = 6.0
+
+# [market_corpus] — the resolved-market corpus builder (`build-market-corpus`):
+#   pull resolved BINARY questions from Polymarket + Manifold (open, no-auth
+#   public APIs) into data/market-corpus/<platform>.jsonl as backtest ground
+#   truth (ADR-0005 diversification; spec: docs/specs/market-corpus.md). All
+#   fields are optional; omitting the section (or any field) uses the defaults
+#   shown here, which match the code defaults on MarketCorpusSettings. Left
+#   COMMENTED — the builder runs on defaults until a run wants to tune them.
+#
+#   min_criteria_chars    : drop a market whose criteria text (Polymarket
+#                           `description` / Manifold `textDescription`) is shorter
+#                           than this — the cheap "resolvable as written?" proxy.
+#                           Default 80.
+#   min_volume_usd        : Polymarket-only traded-volume floor (dollars). Default
+#                           1000.
+#   min_unique_bettors    : Manifold-only floor on uniqueBettorCount. Default 5.
+#   exclude_self_resolved : Manifold-only — drop markets the creator resolved
+#                           themselves (resolverId == creatorId), the self-
+#                           resolution noise the recon flagged. Default true.
+#                           (Polymarket is UMA-oracle adjudicated; never applies.)
+#   llm_rubric_enabled    : the optional ForecastBench-style LLM "is this
+#                           resolvable as written?" rubric — DEFERRED to M3. A
+#                           config-gated no-op stub for now; leave false.
+#   page_size             : rows requested per listing page (capped per platform).
+#                           Default 100.
+#   page_delay_seconds    : politeness delay between HTTP requests. Default 0.5.
+#   timeout_seconds       : per-request HTTP timeout. Default 20.0.
+#
+# [market_corpus]
+# min_criteria_chars = 80
+# min_volume_usd = 1000.0
+# min_unique_bettors = 5
+# exclude_self_resolved = true
+# llm_rubric_enabled = false
+# page_size = 100
+# page_delay_seconds = 0.5
+# timeout_seconds = 20.0

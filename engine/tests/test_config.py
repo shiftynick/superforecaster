@@ -205,6 +205,54 @@ def test_load_retrieval_settings_repo_default_resolves() -> None:
     assert r.asknews_monthly_credit_cap > 0
 
 
+# --- Market-corpus settings loader ------------------------------------------
+
+
+def test_load_market_corpus_settings_defaults_when_missing(config_path: Path) -> None:
+    from superforecaster.config import MarketCorpusSettings, load_market_corpus_settings
+
+    # _TOML has no [market_corpus] section -> all defaults.
+    assert load_market_corpus_settings(config_path) == MarketCorpusSettings()
+
+
+def test_load_market_corpus_settings_reads_section(tmp_path: Path) -> None:
+    from superforecaster.config import load_market_corpus_settings
+
+    path = tmp_path / "settings.toml"
+    path.write_text(
+        "[market_corpus]\n"
+        "min_criteria_chars = 120\n"
+        "min_volume_usd = 2500.0\n"
+        "min_unique_bettors = 8\n"
+        "exclude_self_resolved = false\n"
+        "llm_rubric_enabled = true\n"
+        "page_size = 50\n"
+        "page_delay_seconds = 1.5\n"
+        "timeout_seconds = 30.0\n",
+        encoding="utf-8",
+    )
+    m = load_market_corpus_settings(path)
+    assert m.min_criteria_chars == 120
+    assert m.min_volume_usd == 2500.0
+    assert m.min_unique_bettors == 8
+    assert m.exclude_self_resolved is False
+    assert m.llm_rubric_enabled is True
+    assert m.page_size == 50
+    assert m.page_delay_seconds == 1.5
+    assert m.timeout_seconds == 30.0
+
+
+def test_load_market_corpus_settings_partial_fills_missing(tmp_path: Path) -> None:
+    from superforecaster.config import load_market_corpus_settings
+
+    path = tmp_path / "settings.toml"
+    path.write_text("[market_corpus]\nmin_volume_usd = 42.0\n", encoding="utf-8")
+    m = load_market_corpus_settings(path)
+    assert m.min_volume_usd == 42.0
+    assert m.min_criteria_chars == 80  # default preserved
+    assert m.exclude_self_resolved is True  # default preserved
+
+
 # --- Ensemble settings loader -----------------------------------------------
 
 

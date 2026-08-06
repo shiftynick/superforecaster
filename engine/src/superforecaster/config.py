@@ -302,6 +302,48 @@ class RetrievalSettings:
 
 
 @dataclass(frozen=True)
+class MarketCorpusSettings:
+    """Tunables for the resolved-market corpus builder (``[market_corpus]`` section).
+
+    Config-over-code: the corpus pull and its quality filters read every threshold
+    from here rather than hard-coding any of them. All fields are optional; a
+    missing ``[market_corpus]`` table (or any field within it) falls back to the
+    defaults shown, so a minimal config still loads.
+
+    Attributes:
+        min_criteria_chars: A market is dropped when its criteria text (the
+            Polymarket ``description`` / Manifold ``textDescription``) is shorter
+            than this many characters — the cheap proxy for "resolvable as written".
+        min_volume_usd: Polymarket-only volume floor (dollars). Markets below it are
+            dropped as too thinly traded to trust.
+        min_unique_bettors: Manifold-only floor on ``uniqueBettorCount``. Markets
+            with fewer distinct bettors are dropped (thin-participation noise).
+        exclude_self_resolved: Manifold-only. When ``True``, a market the *creator*
+            resolved themselves (``resolverId == creatorId``) is dropped — the
+            self-resolution noise the recon flagged (Polymarket uses UMA oracle
+            adjudication, so this never applies there).
+        llm_rubric_enabled: The optional ForecastBench-style LLM rubric filter
+            ("is this resolvable as written?"). DEFERRED to M3 — a config-gated
+            no-op stub for now; leave ``False``. Setting it ``True`` currently
+            records a wired-but-inert pass, it does not call an LLM.
+        page_size: Rows requested per listing page (both platforms cap near 100 /
+            500; 100 is a safe, polite default).
+        page_delay_seconds: Politeness delay slept between consecutive HTTP requests
+            (listing pages and per-market detail fetches alike).
+        timeout_seconds: Per-request HTTP timeout.
+    """
+
+    min_criteria_chars: int = 80
+    min_volume_usd: float = 1000.0
+    min_unique_bettors: int = 5
+    exclude_self_resolved: bool = True
+    llm_rubric_enabled: bool = False
+    page_size: int = 100
+    page_delay_seconds: float = 0.5
+    timeout_seconds: float = 20.0
+
+
+@dataclass(frozen=True)
 class Settings:
     """The non-secret engine settings, grouped by section."""
 
@@ -421,6 +463,15 @@ def _float_field(table: object, key: str, default: float) -> float:
     return default
 
 
+def _bool_field(table: object, key: str, default: bool) -> bool:
+    """Read a boolean ``key`` from a TOML table, else return ``default``."""
+    if isinstance(table, dict):
+        value = table.get(key)
+        if isinstance(value, bool):
+            return value
+    return default
+
+
 def load_retrieval_settings(path: Path | None = None) -> RetrievalSettings:
     """Return the :class:`RetrievalSettings` from the ``[retrieval]`` section.
 
@@ -453,6 +504,32 @@ def load_retrieval_settings(path: Path | None = None) -> RetrievalSettings:
         reuse_research_max_age_hours=_float_field(
             table, "reuse_research_max_age_hours", d.reuse_research_max_age_hours
         ),
+    )
+
+
+def load_market_corpus_settings(path: Path | None = None) -> MarketCorpusSettings:
+    """Return the :class:`MarketCorpusSettings` from the ``[market_corpus]`` section.
+
+    Every field is optional: a missing ``[market_corpus]`` table (or any missing
+    field within it) falls back to the built-in defaults on
+    :class:`MarketCorpusSettings`, so a minimal config still loads. The
+    ``SUPERFORECASTER_CONFIG`` env override and default-path resolution match
+    :func:`load_settings`.
+
+    Args:
+        path: Optional explicit config path (defaults to the resolved location).
+    """
+    table = _load_toml(path).get("market_corpus")
+    d = MarketCorpusSettings()  # defaults
+    return MarketCorpusSettings(
+        min_criteria_chars=_int_field(table, "min_criteria_chars", d.min_criteria_chars),
+        min_volume_usd=_float_field(table, "min_volume_usd", d.min_volume_usd),
+        min_unique_bettors=_int_field(table, "min_unique_bettors", d.min_unique_bettors),
+        exclude_self_resolved=_bool_field(table, "exclude_self_resolved", d.exclude_self_resolved),
+        llm_rubric_enabled=_bool_field(table, "llm_rubric_enabled", d.llm_rubric_enabled),
+        page_size=_int_field(table, "page_size", d.page_size),
+        page_delay_seconds=_float_field(table, "page_delay_seconds", d.page_delay_seconds),
+        timeout_seconds=_float_field(table, "timeout_seconds", d.timeout_seconds),
     )
 
 
