@@ -81,4 +81,8 @@ rule are unchanged.
 
 ## Results
 
-*(at completion)*
+**Interim 2026-08-06 (N=9 resolved of 40 — DIRECTIONAL ONLY):** A baseline 0.207,
+B ensemble 0.223 — baseline marginally *ahead* here. Note this contradicts experiment
+002's N=7 read (B ahead of A), which is exactly what noise looks like at single-digit N;
+the pre-registration forbids acting on either. Resolutions via the public-page web reader.
+Full read awaits the September resolutions.

@@ -67,3 +67,13 @@ test is free because the members already ran.)
 `experiment-status` support for derived/pooled arms is ordinary scoring machinery and may
 be built whenever; until then the doc's rule is computed by script. No `.toml` manifest is
 registered (manifests describe record-matching arms; 004 has none of its own).
+
+## Results
+
+**Interim 2026-08-06 (N=7 resolved — DIRECTIONAL ONLY):** P-ABC 0.103, P-BC 0.098 vs
+best single arm B 0.091. **The pool did NOT beat B** — pooling averaged the strong B with
+weaker A/C and landed between them. Pre-registered adoption rule (P-ABC beats B on >=60%
+with negative mean delta) NOT met -> no promotion. Honest early evidence against the naive
+equal-weight portfolio thesis WHEN one member clearly dominates; learned (per-category)
+weighting is the plausible rescue, and belongs to a later experiment. Full read awaits
+September.

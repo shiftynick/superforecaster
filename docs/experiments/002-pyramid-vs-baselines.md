@@ -84,4 +84,23 @@ Arms, question set, metric, and decision rule are unchanged.
 
 ## Results
 
-*(at completion)*
+**Interim 2026-08-06 (N=7 resolved of 40 — DIRECTIONAL ONLY, no adoption at this N;
+resolutions via the public-page web reader):**
+
+| Arm | mean Brier (N=7) |
+|---|---|
+| B ensemble | **0.091** (best) |
+| P-BC pool (exp 004) | 0.098 |
+| P-ABC pool (exp 004) | 0.103 |
+| A baseline | 0.120 |
+| C pyramid (blended) | 0.150 |
+| C-raw (structural only) | 0.288 |
+
+Reads (all directional; the 7 resolved are the EARLY-resolving subset, plausibly easier
+than the full set): (1) **the holistic blend is strongly validated** — C-raw 0.288 vs
+C-blended 0.150 nearly halved the pyramid's error (a within-C comparison on identical
+questions, the most trustworthy signal here); (2) **the architecture pool did NOT beat its
+best member** — P-ABC/P-BC land between B and A because B was already strongest and
+pooling averaged in weaker arms; experiment 004's adoption rule (pool must beat B) is NOT
+met; (3) C-blended underperforms A here — structure is not yet adding value on this small
+easy subset. Full read awaits the September resolutions.

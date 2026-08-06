@@ -84,3 +84,10 @@ tokens). Max AskNews credits: 170 (~4/question fresh).
 
 This costs real money (~$5–15) and changes nothing until its read is in. Freeze on your
 word — reply "freeze 005" (or amend first).
+
+## Results
+
+**Interim 2026-08-06 (N=6 resolved — DIRECTIONAL ONLY, far below the N~40 the decision
+rule needs):** E-med 0.137 vs E-low 0.143 — medium marginally better, and at 1.5x cost
+(under the 3x adoption ceiling). Directionally favorable to medium but N=6 is far too thin
+to trigger the frozen adoption rule; hold. Full read awaits September.
