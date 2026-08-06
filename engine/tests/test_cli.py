@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -19,6 +19,13 @@ from superforecaster.search import SearchResult
 from . import fixtures
 
 runner = CliRunner()
+
+# Anchor for "open, soon-closing" fixture questions. Computed relative to the
+# test run's clock so these snapshots never age out of the CLI's
+# now <= scheduled_close_time <= now + closing_within_days window (cli.py's
+# _select_questions). Fixed absolute dates used to rot once the calendar
+# caught up to them (that's what broke this file — see 2026-08-06 fix).
+_NOW = datetime.now(UTC)
 
 
 class FakeClient:
@@ -242,7 +249,9 @@ def _pass_cli_check(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _seed_open_question(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Scrape one open, soon-closing question into the snapshot store."""
-    _install_fake(monkeypatch, [fixtures.open_binary_post(101, 201)])
+    post = fixtures.open_binary_post(101, 201)
+    post["question"]["scheduled_close_time"] = (_NOW + timedelta(days=5)).isoformat()
+    _install_fake(monkeypatch, [post])
     runner.invoke(cli.app, ["scrape", "--data-dir", str(tmp_path)])
 
 
@@ -617,9 +626,9 @@ def test_forecast_one_failure_still_stores_others(
 ) -> None:
     # Two open, soon-closing questions with distinct close times for stable order.
     post_a = fixtures.open_binary_post(101, 201)
-    post_a["question"]["scheduled_close_time"] = "2026-08-01T00:00:00Z"
+    post_a["question"]["scheduled_close_time"] = (_NOW + timedelta(days=1)).isoformat()
     post_b = fixtures.open_binary_post(102, 202)
-    post_b["question"]["scheduled_close_time"] = "2026-08-02T00:00:00Z"
+    post_b["question"]["scheduled_close_time"] = (_NOW + timedelta(days=2)).isoformat()
     snap_dir = tmp_path / "snapshots"
     fc_dir = tmp_path / "forecasts"
     _install_fake(monkeypatch, [post_a, post_b])
@@ -885,9 +894,9 @@ def test_forecast_ensemble_hard_failure_is_isolated(
 ) -> None:
     # Two open questions with distinct close times for a stable order.
     post_a = fixtures.open_binary_post(101, 201)
-    post_a["question"]["scheduled_close_time"] = "2026-08-01T00:00:00Z"
+    post_a["question"]["scheduled_close_time"] = (_NOW + timedelta(days=1)).isoformat()
     post_b = fixtures.open_binary_post(102, 202)
-    post_b["question"]["scheduled_close_time"] = "2026-08-02T00:00:00Z"
+    post_b["question"]["scheduled_close_time"] = (_NOW + timedelta(days=2)).isoformat()
     snap_dir = tmp_path / "snapshots"
     fc_dir = tmp_path / "forecasts"
     _pin_ensemble_config(monkeypatch, tmp_path, _THREE_CLAUDE_MEMBERS)
