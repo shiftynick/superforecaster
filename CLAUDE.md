@@ -1,6 +1,14 @@
 # Superforecaster — agent workspace guide
 
-Personal forecasting system: give it a resolvable question, it researches and returns a calibrated probability + confidence + legible argument. Currently: **discovery/foundation phase — engine code is just beginning; read `docs/VISION.md` before designing anything.**
+Personal forecasting system: give it a resolvable question, it researches and returns a calibrated probability + confidence + legible argument.
+
+> **PAUSED 2026-08-06 — read [`HANDOFF.md`](HANDOFF.md) FIRST.** It has the state of play,
+> the two commands to run on return, the decisions awaiting the owner, and the operational
+> gotchas. Then `docs/VISION.md` for what we're building.
+
+Current phase: **engine built and experimentally validated** — candidates A/B/C live, six
+pre-registered experiments (one complete, four accruing resolutions), retrieval + eval
+harnesses working. Not built: candidates D/E, postmortems, the web app.
 
 ## Repo map
 
